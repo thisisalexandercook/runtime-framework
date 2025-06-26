@@ -1,0 +1,273 @@
+\documentclass[12pt]{article}
+
+\usepackage[margin=0.75in]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\definecolor{btKeyword}{HTML}{005CC5}
+\definecolor{btComment}{HTML}{6A737D}
+\definecolor{btString} {HTML}{22863A}
+\definecolor{btBg}     {gray}{0.97}
+
+\lstdefinestyle{bytejava}{
+  language         = Java,
+  basicstyle       = \ttfamily\small,
+  keywordstyle     = \color{btKeyword}\bfseries,
+  commentstyle     = \color{btComment}\itshape,
+  stringstyle      = \color{btString},
+  numbers          = left,
+  numberstyle      = \tiny\color{btComment},
+  numbersep        = 6pt,
+  showstringspaces = false,
+  tabsize          = 2,
+  frame            = none,            % ← No frame
+  backgroundcolor  = {},              % ← Transparent background
+  breaklines       = true,
+  captionpos       = b,
+  breakatwhitespace= false,
+  breakautoindent  = true
+}
+
+\lstset{style=bytejava}
+
+\title{Runtime Framework Outline}
+\author{Alex Cook}
+\date{\today}
+
+\begin{document}
+\maketitle
+% CF term would be annotated for
+% explicit annotations always preserved in bytecode, but default may not be there
+% bytecode could see a nullmarked context but not each default was applied. Can say you were in
+% a marked context but not exactly what that means
+% should checked actually have the conservative and liberal tag attached to it
+\section{Introduction}\label{sec:intro}
+Many Java developers rely on the language's annotation system together with pluggable type-checking tools such as the Checker Framework\footnote{\url{https://checkerframework.org}} to extend the guarantees of the built-in type system. By attaching qualifier annotations, they gain stronger compile-time assurances about null safety, mutability, and more.
+
+Applying these annotations across an existing codebase, however, is labor-intensive and can become a significant burden for developers, particularly on large projects. Default-annotation mechanisms offer some relief, yet they are often either too conservative, leading to an overwhelming number of compile-time errors, or too permissive, which reduces overall safety guarantees when interacting with unknown clients. Worse, annotations may be added without ever being checked and persist into bytecode with no artefact of their verification status. 
+
+To address these concerns, the following presents a runtime framework to support gradual type systems that embeds itself within the JVM. It leverages tooling provided by Java agents to monitor a runtime environment and inject checks at the boundary of checked and unchecked code. Consequently, developers who depend on pluggable type-systems can extend these guarantees into execution, even when working with partially annotated code bases.
+
+\section{Understanding Annotations}\label{sec:annotations}
+Adding annotations to a codebase introduces two key notions:
+
+\begin{description}[style=nextline,leftmargin=1.6cm]
+  \item[Marked code]
+    Source and/or bytecode that carries type-qualifier annotations.
+  \item[Checked code]
+    Source that has been successfully verified by a static checker and it counterpart compiled bytecode.
+\end{description}
+
+To make the distinction concrete, Listing~\ref{lst:marked-vs-unmarked} shows a pair of Java classes that use the JSpecify nullness qualifiers\footnote{\url{https://jspecify.dev/docs/spec/}}.
+
+\begin{lstlisting}[
+  caption={Unmarked versus marked \& checked classes},
+  label={lst:marked-vs-unmarked}
+]
+// file A.java
+public class A {
+    private String name;
+
+    public B(String name) {
+        this.name = name;
+    }
+
+    public int nameLength() {
+        return name.length();
+    }
+}
+
+// file B.java
+@NullMarkped
+public class B {
+    private String name;
+
+    public B(String name) {
+        this.name = name;
+    }
+
+    public int nameLength() {
+        return name.length();
+    }
+}
+\end{lstlisting}
+
+From this example we can assert exactly two facts:
+\begin{enumerate}
+  \item \texttt{A} is unmarked code.
+  \item \texttt{B} is marked code.
+\end{enumerate}
+The source alone tells us nothing about whether either class is checked. Moreover, while their bytecode counterparts will preserve explicit markings, implicit defaults may or may not be preserved. According to Jspecify's specification, they should not be, however tooling such as the Checker Framework may provide functionality for preservation. If unmarked code does not preserve its defaults in bytecode, runtime tooling has no way of determining that this code was actually checked. To that point, runtime tooling has no way of determining if even marked code was checked. 
+
+Furthermore, if a static checker provides default annotations for unmarked code a scenario could arise where unmarked code is at the same time checked code, with the problem of bytecode annotation retention persisting here as well. Therefore all 4 permutations of marked and checked code are possible:
+\begin{enumerate}
+  \item Marked code that is checked.
+  \item Unmarked code that is unchecked.
+  \item Marked code that is unchecked.
+  \item Unmarked code that is unchecked.
+  \end{enumerate}
+
+To further complicate matters, we must also consider how the code was check. That is to say, was the code checked conservatively or optimistically.
+
+A runtime framework should address this ambiguity by giving developers control over how such fuzzy distinctions are interpreted. This can be achieved through trust modes, each representing a distinct level of confidence in the bytecode. Every mode encapsulates specific assumptions and, when needed, includes supplementary metadata to reflect the degree of trust. 
+
+\section{Additional Metadata}\label{sec:metadata}
+The Static Analysis Interchange Format\footnote{\url{https://sarifweb.azurewebsites.net}} (SARIF) is a highly expressive standardized output format for static analysis tools. By leveraging this format, a runtime framework can be passed a highly detailed outline of exactly what happened at compile time.
+
+This metadata could include information such as which classes and methods were actually checked, their most precise typing information what warnings and/or errors were suppressed. Consider Listing~\ref{lst:marked-vs-unmarked}, which defines two classes A and B. Compiled with the Checker Framework's nullness checker using the command \lstinline!javacheck -processor nullness A.java B.java! would produce  Listing~\ref{lst:sarif-contrast}. Note that javacheck is an alias Checker Frameworks javac. 
+
+
+\begin{lstlisting}[
+  caption={SARIF metadata contrasting unmarked \texttt{A.java} with \texttt{@NullMarked} \texttt{B.java}},
+  label={lst:sarif-contrast},
+  language=json
+]
+{
+  "version": "2.1.0",
+  "runs": [{
+    "tool": {
+      "driver": {
+        "name": "Checker Framework",
+        "informationUri": "https://checkerframework.org",
+        "rules": [
+          { "id": "nullness", "name": "Nullness Checker" }
+        ]
+      }
+    },
+    "results": [],
+    "artifacts": [
+      {
+        "location": { "uri": "A.java" },
+        "properties": {
+          "nullnessChecked": false,
+          "defaultAnnotation": null,
+          "suppressedWarnings": []
+        }
+      },
+      {
+        "location": { "uri": "B.java" },
+        "properties": {
+          "nullnessChecked": true,
+          "defaultAnnotation": "@NonNull",
+          "suppressedWarnings": [],
+          "fields": [
+            {
+              "name": "name",
+              "type": "java.lang.String",
+              "annotations": ["@NonNull"]
+            }
+          ],
+          "constructors": [
+            {
+              "signature": "(String)",
+              "parameters": [
+                {
+                  "index": 0,
+                  "name": "name",
+                  "type": "java.lang.String",
+                  "annotations": ["@NonNull"]
+                }
+              ]
+            }
+          ],
+          "methods": [
+            {
+              "name": "nameLength",
+              "signature": "()int",
+              "return": {
+                "type": "int",
+                "annotations": ["@NonNull"]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }]
+}
+\end{lstlisting}
+
+The Checker Framework allows developers to add conservative defaults to a file which is not marked. If B.java was not @NullMarked, a user could compile with the command \lstinline!javacheck -processor nullness -AuseConservativeDefaultsForUncheckedCode=source B.java!. This would produce the SARIF output in Listing~\ref{lst:sarif-b}. Notice that the name field of class B is now @Nullable. Note that the return value of the nameLength method is still @NonNull due to flow sensitive refinement within the nullness checker. 
+
+\begin{lstlisting}[
+  caption={SARIF metadata for \texttt{B.java} compiled with conservative nullness defaults},
+  label={lst:sarif-b},
+  language=json
+]
+{
+  "version": "2.1.0",
+  "runs": [{
+    "tool": {
+      "driver": {
+        "name": "Checker Framework",
+        "informationUri": "https://checkerframework.org",
+        "rules": [
+          { "id": "nullness", "name": "Nullness Checker" }
+        ]
+      }
+    },
+    "results": [],
+    "artifacts": [
+      {
+        "location": { "uri": "B.java" },
+        "properties": {
+          "nullnessChecked": true,
+          "defaultAnnotation": null,
+          "suppressedWarnings": [],
+          "fields": [
+            {
+              "name": "name",
+              "type": "java.lang.String",
+              "annotations": ["@Nullable"]
+            }
+          ],
+          "constructors": [
+            {
+              "signature": "(String)",
+              "parameters": [
+                {
+                  "index": 0,
+                  "name": "name",
+                  "type": "java.lang.String",
+                  "annotations": ["@NonNull"]
+                }
+              ]
+            }
+          ],
+          "methods": [
+            {
+              "name": "nameLength",
+              "signature": "()int",
+              "return": {
+                "type": "int",
+                "annotations": ["@NonNull"]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }]
+}
+\end{lstlisting}
+
+\section{Understanding Defaults}\label{sec:defaults}
+
+\section{Mode Overview}\label{sec:modes}
+
+\section{A Gradual Nullness Checker}\label{sec:nullness}
+
+\bibliographystyle{plain}
+\bibliography{bib/runtime-research}
+
+\end{document}
+
+
+%%% Local Variables:
+%%% mode: LaTeX
+%%% TeX-master: t
+%%% End:
