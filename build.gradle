@@ -7,4 +7,12 @@ subprojects {
     repositories {
 	mavenCentral()
     }
+
+    plugins.withId('java') {
+        java {
+            toolchain {
+                languageVersion = JavaLanguageVersion.of(25)
+            }
+        }
+    }
 }
