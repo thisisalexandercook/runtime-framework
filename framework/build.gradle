@@ -1,0 +1,17 @@
+plugins {
+    id 'java'
+    id 'net.ltgt.errorprone'
+    id 'com.diffplug.spotless'
+}
+
+dependencies {
+    errorprone("com.google.errorprone:error_prone_core:2.39.0")
+}
+
+jar {
+    manifest {
+        attributes(
+            'Premain-Class': 'io.github.eisop.runtimeframework.agent.RuntimeAgent',
+        )
+    }
+}
