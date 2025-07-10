@@ -23,7 +23,6 @@ jobs:
         with:
           distribution: temurin
           java-version: 25-ea
-          cache: gradle
 
       - name: Inject JAVA_HOME_21_64 into `gradle.properties` to always use JDK 21 for Gradle
         run: mkdir ~/.gradle && echo "org.gradle.java.home=$JAVA_HOME_21_X64" >> ~/.gradle/gradle.properties
