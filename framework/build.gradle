@@ -5,7 +5,7 @@ plugins {
 }
 
 dependencies {
-    errorprone("com.google.errorprone:error_prone_core:2.40.0")
+    errorprone("com.google.errorprone:error_prone_core:2.41.0")
 }
 
 jar {
