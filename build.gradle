@@ -1,13 +1,14 @@
 plugins {
     id 'net.ltgt.errorprone'  version '4.3.0' apply false
-    id 'com.diffplug.spotless' version '7.2.1' apply true
+    id 'com.diffplug.spotless' version '7.2.1' apply false
+    id 'java'
 }
 
 subprojects {
     repositories {
 	mavenCentral()
     }
-
+    // TODO: better spotless integration to support groovy etc...
     apply plugin: 'com.diffplug.spotless'
     plugins.withId('java') {
         java {
@@ -19,6 +20,23 @@ subprojects {
 	spotless {
         java {
             googleJavaFormat('1.22.0')
+            }
+	}
+    }
+}
+
+allprojects {
+    apply plugin: 'eclipse'
+    eclipse.classpath {
+	defaultOutputDir = file("build/default")
+	file.whenMerged { cp ->
+            cp.entries.forEach { cpe ->
+		if (cpe instanceof org.gradle.plugins.ide.eclipse.model.SourceFolder) {
+                    cpe.output = cpe.output.replace "bin/", "build/classes/java/"
+		}
+		if (cpe instanceof org.gradle.plugins.ide.eclipse.model.Output) {
+                    cpe.path = cpe.path.replace "bin/", "build/"
+		}
             }
 	}
     }
