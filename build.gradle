@@ -19,7 +19,7 @@ subprojects {
 
 	spotless {
         java {
-            googleJavaFormat('1.22.0')
+            googleJavaFormat('1.32.0')
             }
 	}
     }
