@@ -1,19 +1,16 @@
 package io.github.eisop.runtimeframework.agent;
 
 import io.github.eisop.runtimeframework.filter.ClassInfo;
-import io.github.eisop.runtimeframework.filter.ClassListFilter;
 import io.github.eisop.runtimeframework.filter.Filter;
 import java.lang.instrument.ClassFileTransformer;
 import java.security.ProtectionDomain;
-import java.util.List;
 
 final class ClassReader implements ClassFileTransformer {
 
   private final Filter<ClassInfo> classFilter;
 
-  ClassReader(List<String> onlyTheseInternalOrDotNames) {
-
-    this.classFilter = new ClassListFilter(onlyTheseInternalOrDotNames);
+  ClassReader(Filter<ClassInfo> filter) {
+    this.classFilter = filter;
   }
 
   @Override
