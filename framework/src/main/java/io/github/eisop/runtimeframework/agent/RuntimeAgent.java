@@ -8,6 +8,6 @@ public final class RuntimeAgent {
 
   public static void premain(String args, Instrumentation inst) {
     var filter = new ClassListFilter(List.of("HelloWorld"));
-    inst.addTransformer(new ClassReader(filter), false);
+    inst.addTransformer(new RuntimeTransformer(filter), false);
   }
 }
