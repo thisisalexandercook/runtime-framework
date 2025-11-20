@@ -1,10 +1,11 @@
 package io.github.eisop.runtimeframework.agent;
 
+import io.github.eisop.runtimeframework.core.RuntimeInstrumenter;
 import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.filter.Filter;
+import io.github.eisop.runtimeframework.util.SysOutInstrumenter;
 import java.lang.classfile.ClassFile;
 import java.lang.classfile.ClassModel;
-import java.lang.classfile.ClassTransform;
 import java.lang.instrument.ClassFileTransformer;
 import java.security.ProtectionDomain;
 
@@ -40,7 +41,8 @@ public class RuntimeTransformer implements ClassFileTransformer {
     try {
       ClassFile cf = ClassFile.of();
       ClassModel classModel = cf.parse(classfileBuffer);
-      return cf.transformClass(classModel, ClassTransform.ACCEPT_ALL);
+      RuntimeInstrumenter instrumenter = new SysOutInstrumenter();
+      return cf.transformClass(classModel, instrumenter.asClassTransform());
 
     } catch (Exception e) {
       System.err.println("[RuntimeFramework] Failed to parse: " + className);
