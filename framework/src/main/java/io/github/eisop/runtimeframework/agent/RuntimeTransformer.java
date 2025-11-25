@@ -1,9 +1,9 @@
 package io.github.eisop.runtimeframework.agent;
 
+import io.github.eisop.runtimeframework.core.RuntimeChecker;
 import io.github.eisop.runtimeframework.core.RuntimeInstrumenter;
 import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.filter.Filter;
-import io.github.eisop.runtimeframework.util.SysOutInstrumenter;
 import java.lang.classfile.ClassFile;
 import java.lang.classfile.ClassModel;
 import java.lang.instrument.ClassFileTransformer;
@@ -12,9 +12,11 @@ import java.security.ProtectionDomain;
 public class RuntimeTransformer implements ClassFileTransformer {
 
   private final Filter<ClassInfo> filter;
+  private final RuntimeChecker checker;
 
-  public RuntimeTransformer(Filter<ClassInfo> filter) {
+  public RuntimeTransformer(Filter<ClassInfo> filter, RuntimeChecker checker) {
     this.filter = filter;
+    this.checker = checker;
   }
 
   @Override
@@ -41,7 +43,7 @@ public class RuntimeTransformer implements ClassFileTransformer {
     try {
       ClassFile cf = ClassFile.of();
       ClassModel classModel = cf.parse(classfileBuffer);
-      RuntimeInstrumenter instrumenter = new SysOutInstrumenter();
+      RuntimeInstrumenter instrumenter = checker.getInstrumenter();
       return cf.transformClass(classModel, instrumenter.asClassTransform());
 
     } catch (Exception e) {
