@@ -3,3 +3,18 @@
 
 # Ignore Gradle build output directory
 build
+
+# Eclipse
+.metadata
+.classpath
+.project
+.externalToolBuilders
+.settings
+**/*.factorypath
+
+# Environment setup
+.direnv/
+.envrc
+
+# bins
+framework/bin/
