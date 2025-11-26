@@ -1,15 +1,25 @@
 plugins {
     id 'net.ltgt.errorprone'  version '4.3.0' apply false
     id 'com.diffplug.spotless' version '8.0.0' apply false
-    id 'java'
 }
 
-subprojects {
+allprojects {
     repositories {
-	mavenCentral()
+        mavenCentral()
     }
-    // TODO: better spotless integration to support groovy etc...
+
     apply plugin: 'com.diffplug.spotless'
+    spotless {
+        groovyGradle {
+            target '**/*.gradle'
+            targetExclude 'build/**', '.gradle/**', '.direnv/**'
+            greclipse()
+            leadingTabsToSpaces(4)
+            trimTrailingWhitespace()
+            endWithNewline()
+        }
+    }
+
     plugins.withId('java') {
         java {
             toolchain {
@@ -17,27 +27,30 @@ subprojects {
             }
         }
 
-	spotless {
-        java {
-            googleJavaFormat('1.32.0')
+        spotless {
+            java {
+                googleJavaFormat('1.32.0')
             }
-	}
-    }
-}
+        }
 
-allprojects {
+        apply plugin: 'net.ltgt.errorprone'
+        dependencies {
+            errorprone("com.google.errorprone:error_prone_core:2.44.0")
+        }
+    }
+
     apply plugin: 'eclipse'
     eclipse.classpath {
-	defaultOutputDir = file("build/default")
-	file.whenMerged { cp ->
+        defaultOutputDir = file("build/default")
+        file.whenMerged { cp ->
             cp.entries.forEach { cpe ->
-		if (cpe instanceof org.gradle.plugins.ide.eclipse.model.SourceFolder) {
+                if (cpe instanceof org.gradle.plugins.ide.eclipse.model.SourceFolder) {
                     cpe.output = cpe.output.replace "bin/", "build/classes/java/"
-		}
-		if (cpe instanceof org.gradle.plugins.ide.eclipse.model.Output) {
+                }
+                if (cpe instanceof org.gradle.plugins.ide.eclipse.model.Output) {
                     cpe.path = cpe.path.replace "bin/", "build/"
-		}
+                }
             }
-	}
+        }
     }
 }

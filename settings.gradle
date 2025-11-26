@@ -8,3 +8,4 @@
 rootProject.name = 'runtime-framework'
 include 'framework'
 include 'docs'
+include 'checker'
