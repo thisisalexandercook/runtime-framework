@@ -31,19 +31,15 @@ public abstract class RuntimeInstrumenter {
 
                       // PHASE 2: Instruction Stream
                       for (CodeElement element : codeModel) {
-
                         if (element instanceof FieldInstruction fInst) {
                           if (isFieldWrite(fInst)) {
-                            // WRITE: Check BEFORE (Value is on stack)
                             generateFieldWriteCheck(codeBuilder, fInst);
                             codeBuilder.with(element);
                           } else if (isFieldRead(fInst)) {
-                            // READ: Check AFTER (Value has just landed on stack)
                             codeBuilder.with(element);
                             generateFieldReadCheck(codeBuilder, fInst);
                           }
                         } else if (element instanceof ReturnInstruction rInst) {
-                          // RETURN: Check BEFORE (Value is on stack)
                           generateReturnCheck(codeBuilder, rInst);
                           codeBuilder.with(element);
                         } else {
@@ -77,12 +73,19 @@ public abstract class RuntimeInstrumenter {
 
     for (int i = 0; i < paramCount; i++) {
       TypeKind type = TypeKind.from(methodDesc.parameterList().get(i));
-      generateParamCheck(builder, slotIndex, type);
+
+      // FIXED: Pass the MethodModel and param index 'i' to match the new signature
+      generateParamCheck(builder, slotIndex, type, method, i);
+
       slotIndex += type.slotSize();
     }
   }
 
-  protected abstract void generateParamCheck(CodeBuilder b, int slotIndex, TypeKind type);
+  // --- Abstract Hooks ---
+
+  // FIXED: Added 'abstract' keyword and updated arguments
+  protected abstract void generateParamCheck(
+      CodeBuilder b, int slotIndex, TypeKind type, MethodModel method, int paramIndex);
 
   protected abstract void generateFieldWriteCheck(CodeBuilder b, FieldInstruction field);
 

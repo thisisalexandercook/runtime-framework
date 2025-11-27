@@ -2,6 +2,7 @@ package io.github.eisop.runtimeframework.util;
 
 import io.github.eisop.runtimeframework.core.RuntimeInstrumenter;
 import java.lang.classfile.CodeBuilder;
+import java.lang.classfile.MethodModel;
 import java.lang.classfile.TypeKind;
 import java.lang.classfile.instruction.FieldInstruction;
 import java.lang.classfile.instruction.ReturnInstruction;
@@ -26,7 +27,8 @@ public class SysOutInstrumenter extends RuntimeInstrumenter {
   }
 
   @Override
-  protected void generateParamCheck(CodeBuilder b, int slotIndex, TypeKind type) {
+  protected void generateParamCheck(
+      CodeBuilder b, int slotIndex, TypeKind type, MethodModel method, int paramIndex) {
     print(b, "   [Param Check] Verifying argument at slot " + slotIndex);
   }
 

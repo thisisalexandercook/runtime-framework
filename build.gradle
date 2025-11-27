@@ -1,4 +1,5 @@
 plugins {
+    id 'base'
     id 'net.ltgt.errorprone'  version '4.3.0' apply false
     id 'com.diffplug.spotless' version '8.0.0' apply false
 }
@@ -54,3 +55,32 @@ allprojects {
         }
     }
 }
+
+task copyToDist(type: Copy) {
+    // FIX: Force this task to run every time (disable incremental build check)
+    outputs.upToDateWhen { false }
+
+    // Use the Layout API to get a provider for the destination directory.
+    // This is safe to capture for the Configuration Cache.
+    def distDir = layout.buildDirectory.dir("dist")
+    into distDir
+
+    // FIX: Flatten the lists so the Copy task sees the actual files, not a List of Lists
+    from {
+        subprojects.collect { it.tasks.withType(Jar) }.flatten()
+    }
+    from {
+        subprojects.findAll { it.plugins.hasPlugin('java') || it.plugins.hasPlugin('java-library') }
+        .collect { it.configurations.getByName('runtimeClasspath') }
+        .flatten()
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    // Log so we know it ran
+    doFirst {
+        // Use the captured provider (.get().asFile) instead of '$buildDir'
+        println ">> Copying artifacts to ${distDir.get().asFile}"
+    }
+}
+
+build.dependsOn copyToDist
