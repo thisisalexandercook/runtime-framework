@@ -44,7 +44,7 @@ public class RuntimeTransformer implements ClassFileTransformer {
       ClassFile cf = ClassFile.of();
       ClassModel classModel = cf.parse(classfileBuffer);
       RuntimeInstrumenter instrumenter = checker.getInstrumenter();
-      return cf.transformClass(classModel, instrumenter.asClassTransform());
+      return cf.transformClass(classModel, instrumenter.asClassTransform(classModel));
 
     } catch (Exception e) {
       System.err.println("[RuntimeFramework] Failed to parse: " + className);

@@ -1,13 +1,16 @@
 package io.github.eisop.runtimeframework.core;
 
 import java.lang.classfile.Attributes;
+import java.lang.classfile.ClassModel;
 import java.lang.classfile.CodeBuilder;
+import java.lang.classfile.FieldModel;
 import java.lang.classfile.MethodModel;
-import java.lang.classfile.TypeAnnotation; // Needed for TypeAnnotation casting
+import java.lang.classfile.Opcode;
+import java.lang.classfile.TypeAnnotation;
 import java.lang.classfile.TypeKind;
 import java.lang.classfile.instruction.FieldInstruction;
 import java.lang.classfile.instruction.ReturnInstruction;
-import java.util.ArrayList; // Needed for aggregation
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -30,20 +33,13 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
   @Override
   protected void generateParamCheck(
       CodeBuilder b, int slotIndex, TypeKind type, MethodModel method, int paramIndex) {
-    // 1. Find Annotations (Now scans both Declaration and Type attributes)
     List<java.lang.classfile.Annotation> paramAnnotations =
         getParameterAnnotations(method, paramIndex);
-
-    // 2. Dispatch
     for (java.lang.classfile.Annotation annotation : paramAnnotations) {
       String descriptor = annotation.classSymbol().descriptorString();
       TargetAnnotation target = targets.get(descriptor);
-
       if (target != null) {
-        // PLUMBING: Load the value onto the stack
         b.aload(slotIndex);
-
-        // LOGIC: Delegate to the target
         target.check(b, type, "Parameter " + paramIndex);
       }
     }
@@ -52,8 +48,6 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
   private List<java.lang.classfile.Annotation> getParameterAnnotations(
       MethodModel method, int paramIndex) {
     List<java.lang.classfile.Annotation> result = new ArrayList<>();
-
-    // 1. Check RuntimeVisibleParameterAnnotations (Legacy/Declaration annotations)
     method
         .findAttribute(Attributes.runtimeVisibleParameterAnnotations())
         .ifPresent(
@@ -63,31 +57,85 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
                 result.addAll(allParams.get(paramIndex));
               }
             });
-
-    // 2. Check RuntimeVisibleTypeAnnotations (Modern Type Use annotations like @NonNull)
     method
         .findAttribute(Attributes.runtimeVisibleTypeAnnotations())
         .ifPresent(
             attr -> {
               for (TypeAnnotation typeAnno : attr.annotations()) {
-                // We must check if this annotation targets the specific parameter index we are
-                // visiting
                 TypeAnnotation.TargetInfo target = typeAnno.targetInfo();
-
                 if (target instanceof TypeAnnotation.FormalParameterTarget paramTarget) {
                   if (paramTarget.formalParameterIndex() == paramIndex) {
-                    // TypeAnnotation wraps the actual Annotation in JDK 25
                     result.add(typeAnno.annotation());
                   }
                 }
               }
             });
-
     return result;
   }
 
+
   @Override
-  protected void generateFieldWriteCheck(CodeBuilder b, FieldInstruction field) {}
+  protected void generateFieldWriteCheck(
+      CodeBuilder b, FieldInstruction field, ClassModel classModel) {ame
+    if (!field.owner().equals(classModel.thisClass())) {
+      // TODO: Field is in another class
+      return;
+    }
+
+    FieldModel targetField = null;
+    for (FieldModel fm : classModel.fields()) {
+      if (fm.fieldName().equals(field.name()) && fm.fieldType().equals(field.type())) {
+        targetField = fm;
+        break;
+      }
+    }
+
+    if (targetField == null) return;
+
+    List<java.lang.classfile.Annotation> annotations = new ArrayList<>();
+
+    targetField
+        .findAttribute(Attributes.runtimeVisibleAnnotations())
+        .ifPresent(attr -> annotations.addAll(attr.annotations()));
+
+    targetField
+        .findAttribute(Attributes.runtimeVisibleTypeAnnotations())
+        .ifPresent(
+            attr -> {
+              for (TypeAnnotation ta : attr.annotations()) {
+                if (ta.targetInfo() instanceof TypeAnnotation.EmptyTarget) {
+                  annotations.add(ta.annotation());
+                }
+              }
+            });
+
+    for (java.lang.classfile.Annotation annotation : annotations) {
+      String descriptor = annotation.classSymbol().descriptorString();
+      TargetAnnotation target = targets.get(descriptor);
+
+      if (target != null) {
+        injectFieldCheck(b, field, target);
+      }
+    }
+  }
+
+  private void injectFieldCheck(CodeBuilder b, FieldInstruction field, TargetAnnotation target) {
+    TypeKind type = TypeKind.fromDescriptor(field.typeSymbol().descriptorString());
+
+      // TODO: Support category 2 types (long/double)
+      
+    if (type.slotSize() != 1) return;
+
+    if (field.opcode() == Opcode.PUTSTATIC) {
+
+      b.dup();
+      target.check(b, type, "Static Field '" + field.name().stringValue() + "'");
+    } else if (field.opcode() == Opcode.PUTFIELD) {
+      b.dup_x1();
+      target.check(b, type, "Field '" + field.name().stringValue() + "'");
+      b.swap();
+    }
+  }
 
   @Override
   protected void generateFieldReadCheck(CodeBuilder b, FieldInstruction field) {}

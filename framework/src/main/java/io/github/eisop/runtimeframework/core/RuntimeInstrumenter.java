@@ -1,5 +1,6 @@
 package io.github.eisop.runtimeframework.core;
 
+import java.lang.classfile.ClassModel;
 import java.lang.classfile.ClassTransform;
 import java.lang.classfile.CodeBuilder;
 import java.lang.classfile.CodeElement;
@@ -16,7 +17,7 @@ public abstract class RuntimeInstrumenter {
 
   public RuntimeInstrumenter() {}
 
-  public ClassTransform asClassTransform() {
+  public ClassTransform asClassTransform(ClassModel classModel) {
     return (classBuilder, classElement) -> {
       if (classElement instanceof MethodModel methodModel && methodModel.code().isPresent()) {
         classBuilder.transformMethod(
@@ -25,15 +26,13 @@ public abstract class RuntimeInstrumenter {
               if (methodElement instanceof CodeAttribute codeModel) {
                 methodBuilder.withCode(
                     codeBuilder -> {
-
-                      // PHASE 1: Method Entry
                       instrumentMethodEntry(codeBuilder, methodModel);
 
-                      // PHASE 2: Instruction Stream
                       for (CodeElement element : codeModel) {
                         if (element instanceof FieldInstruction fInst) {
                           if (isFieldWrite(fInst)) {
-                            generateFieldWriteCheck(codeBuilder, fInst);
+
+                            generateFieldWriteCheck(codeBuilder, fInst, classModel);
                             codeBuilder.with(element);
                           } else if (isFieldRead(fInst)) {
                             codeBuilder.with(element);
@@ -73,21 +72,16 @@ public abstract class RuntimeInstrumenter {
 
     for (int i = 0; i < paramCount; i++) {
       TypeKind type = TypeKind.from(methodDesc.parameterList().get(i));
-
-      // FIXED: Pass the MethodModel and param index 'i' to match the new signature
       generateParamCheck(builder, slotIndex, type, method, i);
-
       slotIndex += type.slotSize();
     }
   }
 
-  // --- Abstract Hooks ---
-
-  // FIXED: Added 'abstract' keyword and updated arguments
   protected abstract void generateParamCheck(
       CodeBuilder b, int slotIndex, TypeKind type, MethodModel method, int paramIndex);
 
-  protected abstract void generateFieldWriteCheck(CodeBuilder b, FieldInstruction field);
+  protected abstract void generateFieldWriteCheck(
+      CodeBuilder b, FieldInstruction field, ClassModel classModel);
 
   protected abstract void generateFieldReadCheck(CodeBuilder b, FieldInstruction field);
 

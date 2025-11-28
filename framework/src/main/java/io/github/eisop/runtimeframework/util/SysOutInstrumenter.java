@@ -1,6 +1,7 @@
 package io.github.eisop.runtimeframework.util;
 
 import io.github.eisop.runtimeframework.core.RuntimeInstrumenter;
+import java.lang.classfile.ClassModel;
 import java.lang.classfile.CodeBuilder;
 import java.lang.classfile.MethodModel;
 import java.lang.classfile.TypeKind;
@@ -33,7 +34,8 @@ public class SysOutInstrumenter extends RuntimeInstrumenter {
   }
 
   @Override
-  protected void generateFieldWriteCheck(CodeBuilder b, FieldInstruction field) {
+  protected void generateFieldWriteCheck(
+      CodeBuilder b, FieldInstruction field, ClassModel classModel) {
     print(b, "   [Field Write] About to write to: " + field.name().stringValue());
   }
 
