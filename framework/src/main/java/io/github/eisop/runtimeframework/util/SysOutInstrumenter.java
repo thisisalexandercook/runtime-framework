@@ -45,7 +45,7 @@ public class SysOutInstrumenter extends RuntimeInstrumenter {
   }
 
   @Override
-  protected void generateReturnCheck(CodeBuilder b, ReturnInstruction ret) {
+  protected void generateReturnCheck(CodeBuilder b, ReturnInstruction ret, MethodModel method) {
     print(b, "   [Return Check] Returning from method via opcode: " + ret.opcode().name());
   }
 }

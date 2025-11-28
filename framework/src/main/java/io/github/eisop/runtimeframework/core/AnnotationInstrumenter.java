@@ -16,10 +16,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-/**
- * A reusable instrumenter that parses bytecode attributes to find annotations and delegates the
- * verification logic to registered {@link TargetAnnotation} strategies.
- */
 public class AnnotationInstrumenter extends RuntimeInstrumenter {
 
   private final Map<String, TargetAnnotation> targets;
@@ -73,14 +69,10 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
     return result;
   }
 
-
   @Override
   protected void generateFieldWriteCheck(
-      CodeBuilder b, FieldInstruction field, ClassModel classModel) {ame
-    if (!field.owner().equals(classModel.thisClass())) {
-      // TODO: Field is in another class
-      return;
-    }
+      CodeBuilder b, FieldInstruction field, ClassModel classModel) {
+    if (!field.owner().equals(classModel.thisClass())) return;
 
     FieldModel targetField = null;
     for (FieldModel fm : classModel.fields()) {
@@ -89,15 +81,12 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
         break;
       }
     }
-
     if (targetField == null) return;
 
     List<java.lang.classfile.Annotation> annotations = new ArrayList<>();
-
     targetField
         .findAttribute(Attributes.runtimeVisibleAnnotations())
         .ifPresent(attr -> annotations.addAll(attr.annotations()));
-
     targetField
         .findAttribute(Attributes.runtimeVisibleTypeAnnotations())
         .ifPresent(
@@ -110,24 +99,16 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
             });
 
     for (java.lang.classfile.Annotation annotation : annotations) {
-      String descriptor = annotation.classSymbol().descriptorString();
-      TargetAnnotation target = targets.get(descriptor);
-
-      if (target != null) {
-        injectFieldCheck(b, field, target);
-      }
+      TargetAnnotation target = targets.get(annotation.classSymbol().descriptorString());
+      if (target != null) injectFieldCheck(b, field, target);
     }
   }
 
   private void injectFieldCheck(CodeBuilder b, FieldInstruction field, TargetAnnotation target) {
     TypeKind type = TypeKind.fromDescriptor(field.typeSymbol().descriptorString());
-
-      // TODO: Support category 2 types (long/double)
-      
     if (type.slotSize() != 1) return;
-
+    // TODO: support cat 2 types (long/double)
     if (field.opcode() == Opcode.PUTSTATIC) {
-
       b.dup();
       target.check(b, type, "Static Field '" + field.name().stringValue() + "'");
     } else if (field.opcode() == Opcode.PUTFIELD) {
@@ -141,5 +122,29 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
   protected void generateFieldReadCheck(CodeBuilder b, FieldInstruction field) {}
 
   @Override
-  protected void generateReturnCheck(CodeBuilder b, ReturnInstruction ret) {}
+  protected void generateReturnCheck(CodeBuilder b, ReturnInstruction ret, MethodModel method) {
+    if (ret.opcode() != Opcode.ARETURN) return;
+
+    List<java.lang.classfile.Annotation> returnAnnotations = new ArrayList<>();
+
+    method
+        .findAttribute(Attributes.runtimeVisibleTypeAnnotations())
+        .ifPresent(
+            attr -> {
+              for (TypeAnnotation typeAnno : attr.annotations()) {
+                if (typeAnno.targetInfo().targetType() == TypeAnnotation.TargetType.METHOD_RETURN) {
+                  returnAnnotations.add(typeAnno.annotation());
+                }
+              }
+            });
+
+    for (java.lang.classfile.Annotation annotation : returnAnnotations) {
+      TargetAnnotation target = targets.get(annotation.classSymbol().descriptorString());
+
+      if (target != null) {
+        b.dup();
+        target.check(b, TypeKind.REFERENCE, "Return value of " + method.methodName().stringValue());
+      }
+    }
+  }
 }
