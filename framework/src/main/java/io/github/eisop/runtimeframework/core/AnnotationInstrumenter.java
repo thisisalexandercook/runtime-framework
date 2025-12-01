@@ -1,5 +1,6 @@
 package io.github.eisop.runtimeframework.core;
 
+import java.lang.classfile.Annotation;
 import java.lang.classfile.Attributes;
 import java.lang.classfile.ClassModel;
 import java.lang.classfile.CodeBuilder;
@@ -29,9 +30,8 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
   @Override
   protected void generateParameterCheck(
       CodeBuilder b, int slotIndex, TypeKind type, MethodModel method, int paramIndex) {
-    List<java.lang.classfile.Annotation> paramAnnotations =
-        getParameterAnnotations(method, paramIndex);
-    for (java.lang.classfile.Annotation annotation : paramAnnotations) {
+    List<Annotation> paramAnnotations = getParameterAnnotations(method, paramIndex);
+    for (Annotation annotation : paramAnnotations) {
       TargetAnnotation target = targets.get(annotation.classSymbol().descriptorString());
       if (target != null) {
         // only handle reference types for now
@@ -41,14 +41,13 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
     }
   }
 
-  private List<java.lang.classfile.Annotation> getParameterAnnotations(
-      MethodModel method, int paramIndex) {
-    List<java.lang.classfile.Annotation> result = new ArrayList<>();
+  private List<Annotation> getParameterAnnotations(MethodModel method, int paramIndex) {
+    List<Annotation> result = new ArrayList<>();
     method
         .findAttribute(Attributes.runtimeVisibleParameterAnnotations())
         .ifPresent(
             attr -> {
-              List<List<java.lang.classfile.Annotation>> allParams = attr.parameterAnnotations();
+              List<List<Annotation>> allParams = attr.parameterAnnotations();
               if (paramIndex < allParams.size()) {
                 result.addAll(allParams.get(paramIndex));
               }
@@ -77,9 +76,9 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
     FieldModel targetField = findField(classModel, field);
     if (targetField == null) return;
 
-    List<java.lang.classfile.Annotation> annotations = getFieldAnnotations(targetField);
+    List<Annotation> annotations = getFieldAnnotations(targetField);
 
-    for (java.lang.classfile.Annotation annotation : annotations) {
+    for (Annotation annotation : annotations) {
       TargetAnnotation target = targets.get(annotation.classSymbol().descriptorString());
       if (target != null) {
         TypeKind type = TypeKind.fromDescriptor(field.typeSymbol().descriptorString());
@@ -106,9 +105,9 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
     FieldModel targetField = findField(classModel, field);
     if (targetField == null) return;
 
-    List<java.lang.classfile.Annotation> annotations = getFieldAnnotations(targetField);
+    List<Annotation> annotations = getFieldAnnotations(targetField);
 
-    for (java.lang.classfile.Annotation annotation : annotations) {
+    for (Annotation annotation : annotations) {
       TargetAnnotation target = targets.get(annotation.classSymbol().descriptorString());
       if (target != null) {
 
@@ -130,8 +129,8 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
     return null;
   }
 
-  private List<java.lang.classfile.Annotation> getFieldAnnotations(FieldModel targetField) {
-    List<java.lang.classfile.Annotation> annotations = new ArrayList<>();
+  private List<Annotation> getFieldAnnotations(FieldModel targetField) {
+    List<Annotation> annotations = new ArrayList<>();
     targetField
         .findAttribute(Attributes.runtimeVisibleAnnotations())
         .ifPresent(attr -> annotations.addAll(attr.annotations()));
@@ -151,7 +150,7 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
   @Override
   protected void generateReturnCheck(CodeBuilder b, ReturnInstruction ret, MethodModel method) {
     if (ret.opcode() != Opcode.ARETURN) return;
-    List<java.lang.classfile.Annotation> returnAnnotations = new ArrayList<>();
+    List<Annotation> returnAnnotations = new ArrayList<>();
     method
         .findAttribute(Attributes.runtimeVisibleTypeAnnotations())
         .ifPresent(
@@ -162,7 +161,7 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
                 }
               }
             });
-    for (java.lang.classfile.Annotation annotation : returnAnnotations) {
+    for (Annotation annotation : returnAnnotations) {
       TargetAnnotation target = targets.get(annotation.classSymbol().descriptorString());
       if (target != null) {
         b.dup();
