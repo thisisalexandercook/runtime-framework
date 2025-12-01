@@ -35,7 +35,7 @@ public abstract class RuntimeInstrumenter {
                             codeBuilder.with(element);
                           } else if (isFieldRead(fInst)) {
                             codeBuilder.with(element);
-                            generateFieldReadCheck(codeBuilder, fInst);
+                            generateFieldReadCheck(codeBuilder, fInst, classModel);
                           }
                         } else if (element instanceof ReturnInstruction rInst) {
                           generateReturnCheck(codeBuilder, rInst, methodModel);
@@ -82,7 +82,8 @@ public abstract class RuntimeInstrumenter {
   protected abstract void generateFieldWriteCheck(
       CodeBuilder b, FieldInstruction field, ClassModel classModel);
 
-  protected abstract void generateFieldReadCheck(CodeBuilder b, FieldInstruction field);
+  protected abstract void generateFieldReadCheck(
+      CodeBuilder b, FieldInstruction field, ClassModel classModel);
 
   protected abstract void generateReturnCheck(
       CodeBuilder b, ReturnInstruction ret, MethodModel method);

@@ -32,8 +32,7 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
     List<java.lang.classfile.Annotation> paramAnnotations =
         getParameterAnnotations(method, paramIndex);
     for (java.lang.classfile.Annotation annotation : paramAnnotations) {
-      String descriptor = annotation.classSymbol().descriptorString();
-      TargetAnnotation target = targets.get(descriptor);
+      TargetAnnotation target = targets.get(annotation.classSymbol().descriptorString());
       if (target != null) {
         b.aload(slotIndex);
         target.check(b, type, "Parameter " + paramIndex);
@@ -74,15 +73,63 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
       CodeBuilder b, FieldInstruction field, ClassModel classModel) {
     if (!field.owner().equals(classModel.thisClass())) return;
 
-    FieldModel targetField = null;
-    for (FieldModel fm : classModel.fields()) {
-      if (fm.fieldName().equals(field.name()) && fm.fieldType().equals(field.type())) {
-        targetField = fm;
-        break;
-      }
-    }
+    FieldModel targetField = findField(classModel, field);
     if (targetField == null) return;
 
+    List<java.lang.classfile.Annotation> annotations = getFieldAnnotations(targetField);
+
+    for (java.lang.classfile.Annotation annotation : annotations) {
+      TargetAnnotation target = targets.get(annotation.classSymbol().descriptorString());
+      if (target != null) {
+        TypeKind type = TypeKind.fromDescriptor(field.typeSymbol().descriptorString());
+        if (type.slotSize() != 1) return;
+
+        if (field.opcode() == Opcode.PUTSTATIC) {
+          b.dup();
+          target.check(b, type, "Static Field '" + field.name().stringValue() + "'");
+        } else if (field.opcode() == Opcode.PUTFIELD) {
+          b.dup_x1();
+          target.check(b, type, "Field '" + field.name().stringValue() + "'");
+          b.swap();
+        }
+      }
+    }
+  }
+
+  @Override
+  protected void generateFieldReadCheck(
+      CodeBuilder b, FieldInstruction field, ClassModel classModel) {
+    // TODO: out of class fields
+    if (!field.owner().equals(classModel.thisClass())) return;
+
+    FieldModel targetField = findField(classModel, field);
+    if (targetField == null) return;
+
+    List<java.lang.classfile.Annotation> annotations = getFieldAnnotations(targetField);
+
+    for (java.lang.classfile.Annotation annotation : annotations) {
+      TargetAnnotation target = targets.get(annotation.classSymbol().descriptorString());
+      if (target != null) {
+
+        TypeKind type = TypeKind.fromDescriptor(field.typeSymbol().descriptorString());
+        if (type.slotSize() == 1) {
+          b.dup();
+          target.check(b, type, "Read Field '" + field.name().stringValue() + "'");
+        }
+      }
+    }
+  }
+
+  private FieldModel findField(ClassModel classModel, FieldInstruction field) {
+    for (FieldModel fm : classModel.fields()) {
+      if (fm.fieldName().equals(field.name()) && fm.fieldType().equals(field.type())) {
+        return fm;
+      }
+    }
+    return null;
+  }
+
+  private List<java.lang.classfile.Annotation> getFieldAnnotations(FieldModel targetField) {
     List<java.lang.classfile.Annotation> annotations = new ArrayList<>();
     targetField
         .findAttribute(Attributes.runtimeVisibleAnnotations())
@@ -97,36 +144,13 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
                 }
               }
             });
-
-    for (java.lang.classfile.Annotation annotation : annotations) {
-      TargetAnnotation target = targets.get(annotation.classSymbol().descriptorString());
-      if (target != null) injectFieldCheck(b, field, target);
-    }
+    return annotations;
   }
-
-  private void injectFieldCheck(CodeBuilder b, FieldInstruction field, TargetAnnotation target) {
-    TypeKind type = TypeKind.fromDescriptor(field.typeSymbol().descriptorString());
-    if (type.slotSize() != 1) return;
-    // TODO: support cat 2 types (long/double)
-    if (field.opcode() == Opcode.PUTSTATIC) {
-      b.dup();
-      target.check(b, type, "Static Field '" + field.name().stringValue() + "'");
-    } else if (field.opcode() == Opcode.PUTFIELD) {
-      b.dup_x1();
-      target.check(b, type, "Field '" + field.name().stringValue() + "'");
-      b.swap();
-    }
-  }
-
-  @Override
-  protected void generateFieldReadCheck(CodeBuilder b, FieldInstruction field) {}
 
   @Override
   protected void generateReturnCheck(CodeBuilder b, ReturnInstruction ret, MethodModel method) {
     if (ret.opcode() != Opcode.ARETURN) return;
-
     List<java.lang.classfile.Annotation> returnAnnotations = new ArrayList<>();
-
     method
         .findAttribute(Attributes.runtimeVisibleTypeAnnotations())
         .ifPresent(
@@ -137,10 +161,8 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
                 }
               }
             });
-
     for (java.lang.classfile.Annotation annotation : returnAnnotations) {
       TargetAnnotation target = targets.get(annotation.classSymbol().descriptorString());
-
       if (target != null) {
         b.dup();
         target.check(b, TypeKind.REFERENCE, "Return value of " + method.methodName().stringValue());

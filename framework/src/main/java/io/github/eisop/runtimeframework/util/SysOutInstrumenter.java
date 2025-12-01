@@ -40,7 +40,8 @@ public class SysOutInstrumenter extends RuntimeInstrumenter {
   }
 
   @Override
-  protected void generateFieldReadCheck(CodeBuilder b, FieldInstruction field) {
+  protected void generateFieldReadCheck(
+      CodeBuilder b, FieldInstruction field, ClassModel classModel) {
     print(b, "   [Field Read] Just read from: " + field.name().stringValue());
   }
 
