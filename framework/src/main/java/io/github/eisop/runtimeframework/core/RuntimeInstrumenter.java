@@ -71,12 +71,12 @@ public abstract class RuntimeInstrumenter {
 
     for (int i = 0; i < paramCount; i++) {
       TypeKind type = TypeKind.from(methodDesc.parameterList().get(i));
-      generateParamCheck(builder, slotIndex, type, method, i);
+      generateParameterCheck(builder, slotIndex, type, method, i);
       slotIndex += type.slotSize();
     }
   }
 
-  protected abstract void generateParamCheck(
+  protected abstract void generateParameterCheck(
       CodeBuilder b, int slotIndex, TypeKind type, MethodModel method, int paramIndex);
 
   protected abstract void generateFieldWriteCheck(

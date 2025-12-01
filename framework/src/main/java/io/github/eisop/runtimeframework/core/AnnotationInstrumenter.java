@@ -27,13 +27,14 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
   }
 
   @Override
-  protected void generateParamCheck(
+  protected void generateParameterCheck(
       CodeBuilder b, int slotIndex, TypeKind type, MethodModel method, int paramIndex) {
     List<java.lang.classfile.Annotation> paramAnnotations =
         getParameterAnnotations(method, paramIndex);
     for (java.lang.classfile.Annotation annotation : paramAnnotations) {
       TargetAnnotation target = targets.get(annotation.classSymbol().descriptorString());
       if (target != null) {
+        // only handle reference types for now
         b.aload(slotIndex);
         target.check(b, type, "Parameter " + paramIndex);
       }

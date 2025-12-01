@@ -28,7 +28,7 @@ public class SysOutInstrumenter extends RuntimeInstrumenter {
   }
 
   @Override
-  protected void generateParamCheck(
+  protected void generateParameterCheck(
       CodeBuilder b, int slotIndex, TypeKind type, MethodModel method, int paramIndex) {
     print(b, "   [Param Check] Verifying argument at slot " + slotIndex);
   }
