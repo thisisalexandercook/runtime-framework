@@ -1,6 +1,7 @@
 package io.github.eisop.runtimeframework.util;
 
 import io.github.eisop.runtimeframework.core.RuntimeInstrumenter;
+import java.lang.classfile.ClassBuilder;
 import java.lang.classfile.ClassModel;
 import java.lang.classfile.CodeBuilder;
 import java.lang.classfile.MethodModel;
@@ -48,5 +49,12 @@ public class SysOutInstrumenter extends RuntimeInstrumenter {
   @Override
   protected void generateReturnCheck(CodeBuilder b, ReturnInstruction ret, MethodModel method) {
     print(b, "   [Return Check] Returning from method via opcode: " + ret.opcode().name());
+  }
+
+  @Override
+  protected void generateBridgeMethods(ClassBuilder builder, ClassModel model, ClassLoader loader) {
+    // Debug instrumenter does not generate bridges, but we can log that the hook was hit
+    System.out.println(
+        "[SysOutInstrumenter] Bridge hook triggered for: " + model.thisClass().asInternalName());
   }
 }

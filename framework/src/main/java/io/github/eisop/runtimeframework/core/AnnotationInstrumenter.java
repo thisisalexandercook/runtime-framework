@@ -1,7 +1,10 @@
 package io.github.eisop.runtimeframework.core;
 
+import io.github.eisop.runtimeframework.filter.ClassInfo;
+import io.github.eisop.runtimeframework.filter.FrameworkSafetyFilter;
 import java.lang.classfile.Annotation;
 import java.lang.classfile.Attributes;
+import java.lang.classfile.ClassBuilder;
 import java.lang.classfile.ClassModel;
 import java.lang.classfile.CodeBuilder;
 import java.lang.classfile.FieldModel;
@@ -11,7 +14,11 @@ import java.lang.classfile.TypeAnnotation;
 import java.lang.classfile.TypeKind;
 import java.lang.classfile.instruction.FieldInstruction;
 import java.lang.classfile.instruction.ReturnInstruction;
+import java.lang.constant.ClassDesc;
+import java.lang.constant.MethodTypeDesc;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -20,11 +27,16 @@ import java.util.stream.Collectors;
 public class AnnotationInstrumenter extends RuntimeInstrumenter {
 
   private final Map<String, TargetAnnotation> targets;
+  private final HierarchyResolver hierarchyResolver;
 
   public AnnotationInstrumenter(Collection<TargetAnnotation> targetAnnotations) {
     this.targets =
         targetAnnotations.stream()
             .collect(Collectors.toMap(t -> t.annotationType().descriptorString(), t -> t));
+    FrameworkSafetyFilter safetyFilter = new FrameworkSafetyFilter();
+    this.hierarchyResolver =
+        new ReflectionHierarchyResolver(
+            className -> safetyFilter.test(new ClassInfo(className.replace('.', '/'), null, null)));
   }
 
   @Override
@@ -168,5 +180,108 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
         target.check(b, TypeKind.REFERENCE, "Return value of " + method.methodName().stringValue());
       }
     }
+  }
+
+  // --- Bridge Method Generation ---
+
+  @Override
+  protected void generateBridgeMethods(ClassBuilder builder, ClassModel model, ClassLoader loader) {
+    for (Method parentMethod : hierarchyResolver.resolveUncheckedMethods(model, loader)) {
+      boolean needsBridge = false;
+
+      for (java.lang.annotation.Annotation[] paramAnnos : parentMethod.getParameterAnnotations()) {
+        for (java.lang.annotation.Annotation anno : paramAnnos) {
+          String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
+          if (targets.containsKey(desc)) {
+            needsBridge = true;
+            break;
+          }
+        }
+      }
+
+      if (needsBridge) {
+        emitBridge(builder, parentMethod);
+      }
+    }
+  }
+
+  private void emitBridge(ClassBuilder builder, Method parentMethod) {
+    String methodName = parentMethod.getName();
+
+    // FIX: Use JDK APIs instead of ASM
+    MethodTypeDesc desc =
+        MethodTypeDesc.of(
+            ClassDesc.ofDescriptor(parentMethod.getReturnType().descriptorString()),
+            Arrays.stream(parentMethod.getParameterTypes())
+                .map(c -> ClassDesc.ofDescriptor(c.descriptorString()))
+                .toArray(ClassDesc[]::new));
+
+    builder.withMethod(
+        methodName,
+        desc,
+        java.lang.reflect.Modifier.PUBLIC,
+        methodBuilder -> {
+          methodBuilder.withCode(
+              codeBuilder -> {
+                int slotIndex = 1;
+                java.lang.annotation.Annotation[][] allAnnos =
+                    parentMethod.getParameterAnnotations();
+                Class<?>[] paramTypes = parentMethod.getParameterTypes();
+
+                // 1. INJECT CHECKS
+                for (int i = 0; i < paramTypes.length; i++) {
+                  TypeKind type =
+                      TypeKind.from(ClassDesc.ofDescriptor(paramTypes[i].descriptorString()));
+
+                  for (java.lang.annotation.Annotation anno : allAnnos[i]) {
+                    String annoDesc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
+                    TargetAnnotation target = targets.get(annoDesc);
+                    if (target != null) {
+                      codeBuilder.aload(slotIndex);
+                      target.check(
+                          codeBuilder,
+                          type,
+                          "Parameter " + i + " in inherited method " + methodName);
+                    }
+                  }
+                  slotIndex += type.slotSize();
+                }
+
+                // 2. CALL SUPER
+                codeBuilder.aload(0);
+                slotIndex = 1;
+                for (Class<?> pType : paramTypes) {
+                  TypeKind type = TypeKind.from(ClassDesc.ofDescriptor(pType.descriptorString()));
+                  loadLocal(codeBuilder, type, slotIndex);
+                  slotIndex += type.slotSize();
+                }
+
+                ClassDesc parentDesc = ClassDesc.of(parentMethod.getDeclaringClass().getName());
+                codeBuilder.invokespecial(parentDesc, methodName, desc);
+
+                // 3. RETURN
+                returnResult(codeBuilder, parentMethod.getReturnType());
+              });
+        });
+  }
+
+  private void loadLocal(CodeBuilder b, TypeKind type, int slot) {
+    switch (type) {
+      case INT, BYTE, CHAR, SHORT, BOOLEAN -> b.iload(slot);
+      case LONG -> b.lload(slot);
+      case FLOAT -> b.fload(slot);
+      case DOUBLE -> b.dload(slot);
+      case REFERENCE -> b.aload(slot);
+      default -> throw new IllegalArgumentException("Unknown type: " + type);
+    }
+  }
+
+  private void returnResult(CodeBuilder b, Class<?> returnType) {
+    if (returnType == void.class) b.return_();
+    else if (returnType == int.class || returnType == boolean.class) b.ireturn();
+    else if (returnType == long.class) b.lreturn();
+    else if (returnType == float.class) b.freturn();
+    else if (returnType == double.class) b.dreturn();
+    else b.areturn();
   }
 }
