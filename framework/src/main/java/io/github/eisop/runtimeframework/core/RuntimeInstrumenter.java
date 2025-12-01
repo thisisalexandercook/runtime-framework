@@ -11,6 +11,7 @@ import java.lang.classfile.Opcode;
 import java.lang.classfile.TypeKind;
 import java.lang.classfile.attribute.CodeAttribute;
 import java.lang.classfile.instruction.FieldInstruction;
+import java.lang.classfile.instruction.InvokeInstruction; // <--- NEW
 import java.lang.classfile.instruction.ReturnInstruction;
 import java.lang.constant.MethodTypeDesc;
 import java.lang.reflect.Modifier;
@@ -19,9 +20,7 @@ public abstract class RuntimeInstrumenter {
 
   public RuntimeInstrumenter() {}
 
-  // UPDATED: Now accepts ClassLoader to pass to the HierarchyResolver
   public ClassTransform asClassTransform(ClassModel classModel, ClassLoader loader) {
-    // We use an anonymous class to implement 'atEnd'
     return new ClassTransform() {
       @Override
       public void accept(ClassBuilder classBuilder, ClassElement classElement) {
@@ -45,6 +44,11 @@ public abstract class RuntimeInstrumenter {
                           } else if (element instanceof ReturnInstruction rInst) {
                             generateReturnCheck(codeBuilder, rInst, methodModel);
                             codeBuilder.with(element);
+                          } else if (element instanceof InvokeInstruction invoke) { // <--- NEW HOOK
+                            // 1. Write the original call
+                            codeBuilder.with(element);
+                            // 2. Check the result (if applicable)
+                            generateMethodCallCheck(codeBuilder, invoke);
                           } else {
                             codeBuilder.with(element);
                           }
@@ -61,7 +65,6 @@ public abstract class RuntimeInstrumenter {
 
       @Override
       public void atEnd(ClassBuilder builder) {
-        // Hook to generate bridge methods after all existing methods are processed
         generateBridgeMethods(builder, classModel, loader);
       }
     };
@@ -83,7 +86,6 @@ public abstract class RuntimeInstrumenter {
 
     for (int i = 0; i < paramCount; i++) {
       TypeKind type = TypeKind.from(methodDesc.parameterList().get(i));
-      // REFACTOR: generateParameterCheck (was generateParamCheck)
       generateParameterCheck(builder, slotIndex, type, method, i);
       slotIndex += type.slotSize();
     }
@@ -91,7 +93,6 @@ public abstract class RuntimeInstrumenter {
 
   // --- Abstract Hooks ---
 
-  // REFACTOR: Renamed from generateParamCheck
   protected abstract void generateParameterCheck(
       CodeBuilder b, int slotIndex, TypeKind type, MethodModel method, int paramIndex);
 
@@ -104,7 +105,9 @@ public abstract class RuntimeInstrumenter {
   protected abstract void generateReturnCheck(
       CodeBuilder b, ReturnInstruction ret, MethodModel method);
 
-  // NEW HOOK: Bridge Generation
+  // NEW HOOK: Triggered immediately after INVOKEVIRTUAL/STATIC/INTERFACE etc.
+  protected abstract void generateMethodCallCheck(CodeBuilder b, InvokeInstruction invoke);
+
   protected abstract void generateBridgeMethods(
       ClassBuilder builder, ClassModel model, ClassLoader loader);
 }

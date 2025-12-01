@@ -7,6 +7,7 @@ import java.lang.classfile.CodeBuilder;
 import java.lang.classfile.MethodModel;
 import java.lang.classfile.TypeKind;
 import java.lang.classfile.instruction.FieldInstruction;
+import java.lang.classfile.instruction.InvokeInstruction; // New
 import java.lang.classfile.instruction.ReturnInstruction;
 import java.lang.constant.ClassDesc;
 import java.lang.constant.MethodTypeDesc;
@@ -51,10 +52,19 @@ public class SysOutInstrumenter extends RuntimeInstrumenter {
     print(b, "   [Return Check] Returning from method via opcode: " + ret.opcode().name());
   }
 
+  // NEW HOOK IMPLEMENTATION
+  @Override
+  protected void generateMethodCallCheck(CodeBuilder b, InvokeInstruction invoke) {
+    print(
+        b,
+        "   [Call Site] Just called: "
+            + invoke.owner().asInternalName()
+            + "."
+            + invoke.name().stringValue());
+  }
+
   @Override
   protected void generateBridgeMethods(ClassBuilder builder, ClassModel model, ClassLoader loader) {
-    // Debug instrumenter does not generate bridges, but we can log that the hook was hit
-    System.out.println(
-        "[SysOutInstrumenter] Bridge hook triggered for: " + model.thisClass().asInternalName());
+    // No-op for debug
   }
 }

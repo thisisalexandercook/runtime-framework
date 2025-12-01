@@ -1,7 +1,7 @@
 package io.github.eisop.runtimeframework.core;
 
 import io.github.eisop.runtimeframework.filter.ClassInfo;
-import io.github.eisop.runtimeframework.filter.FrameworkSafetyFilter;
+import io.github.eisop.runtimeframework.filter.Filter;
 import java.lang.classfile.Annotation;
 import java.lang.classfile.Attributes;
 import java.lang.classfile.ClassBuilder;
@@ -13,6 +13,7 @@ import java.lang.classfile.Opcode;
 import java.lang.classfile.TypeAnnotation;
 import java.lang.classfile.TypeKind;
 import java.lang.classfile.instruction.FieldInstruction;
+import java.lang.classfile.instruction.InvokeInstruction;
 import java.lang.classfile.instruction.ReturnInstruction;
 import java.lang.constant.ClassDesc;
 import java.lang.constant.MethodTypeDesc;
@@ -28,15 +29,26 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
 
   private final Map<String, TargetAnnotation> targets;
   private final HierarchyResolver hierarchyResolver;
+  private final Filter<ClassInfo> safetyFilter;
+  private final TargetAnnotation defaultTarget;
 
-  public AnnotationInstrumenter(Collection<TargetAnnotation> targetAnnotations) {
+  // UPDATED CONSTRUCTOR: Now accepts the Filter directly from the Checker
+  public AnnotationInstrumenter(
+      Collection<TargetAnnotation> targetAnnotations, Filter<ClassInfo> safetyFilter) {
     this.targets =
         targetAnnotations.stream()
             .collect(Collectors.toMap(t -> t.annotationType().descriptorString(), t -> t));
-    FrameworkSafetyFilter safetyFilter = new FrameworkSafetyFilter();
+
+    this.defaultTarget = targetAnnotations.stream().findFirst().orElse(null);
+
+    // Store the passed filter instead of recreating it from system properties
+    this.safetyFilter = safetyFilter;
+
+    // Use the passed filter for the hierarchy resolver too
     this.hierarchyResolver =
         new ReflectionHierarchyResolver(
-            className -> safetyFilter.test(new ClassInfo(className.replace('.', '/'), null, null)));
+            className ->
+                this.safetyFilter.test(new ClassInfo(className.replace('.', '/'), null, null)));
   }
 
   @Override
@@ -46,7 +58,6 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
     for (Annotation annotation : paramAnnotations) {
       TargetAnnotation target = targets.get(annotation.classSymbol().descriptorString());
       if (target != null) {
-        // only handle reference types for now
         b.aload(slotIndex);
         target.check(b, type, "Parameter " + paramIndex);
       }
@@ -72,6 +83,7 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
                 TypeAnnotation.TargetInfo target = typeAnno.targetInfo();
                 if (target instanceof TypeAnnotation.FormalParameterTarget paramTarget) {
                   if (paramTarget.formalParameterIndex() == paramIndex) {
+                    // Assuming TypeAnnotation in recent JDK 25 builds exposes .annotation()
                     result.add(typeAnno.annotation());
                   }
                 }
@@ -111,7 +123,6 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
   @Override
   protected void generateFieldReadCheck(
       CodeBuilder b, FieldInstruction field, ClassModel classModel) {
-    // TODO: out of class fields
     if (!field.owner().equals(classModel.thisClass())) return;
 
     FieldModel targetField = findField(classModel, field);
@@ -122,7 +133,6 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
     for (Annotation annotation : annotations) {
       TargetAnnotation target = targets.get(annotation.classSymbol().descriptorString());
       if (target != null) {
-
         TypeKind type = TypeKind.fromDescriptor(field.typeSymbol().descriptorString());
         if (type.slotSize() == 1) {
           b.dup();
@@ -182,21 +192,51 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
     }
   }
 
-  // --- Bridge Method Generation ---
+  @Override
+  protected void generateMethodCallCheck(CodeBuilder b, InvokeInstruction invoke) {
+    String ownerClass = invoke.owner().asInternalName();
+    boolean isUncheckedTarget = !safetyFilter.test(new ClassInfo(ownerClass, null, null));
+
+    if (isUncheckedTarget) {
+      ClassDesc returnType = invoke.typeSymbol().returnType();
+      TypeKind type = TypeKind.from(returnType);
+
+      if (type == TypeKind.REFERENCE && defaultTarget != null) {
+        b.dup();
+        defaultTarget.check(b, type, "Result from unchecked method " + invoke.name().stringValue());
+      }
+    }
+  }
 
   @Override
   protected void generateBridgeMethods(ClassBuilder builder, ClassModel model, ClassLoader loader) {
     for (Method parentMethod : hierarchyResolver.resolveUncheckedMethods(model, loader)) {
-      boolean needsBridge = false;
 
-      for (java.lang.annotation.Annotation[] paramAnnos : parentMethod.getParameterAnnotations()) {
-        for (java.lang.annotation.Annotation anno : paramAnnos) {
+      // 1. DETERMINE IF BRIDGE IS NEEDED
+      //    We check both Explicit Annotations AND the Implicit Default Policy
+      boolean needsBridge = false;
+      Class<?>[] paramTypes = parentMethod.getParameterTypes();
+      java.lang.annotation.Annotation[][] paramAnnos = parentMethod.getParameterAnnotations();
+
+      for (int i = 0; i < paramTypes.length; i++) {
+        boolean explicitFound = false;
+
+        // Check Explicit
+        for (java.lang.annotation.Annotation anno : paramAnnos[i]) {
           String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
           if (targets.containsKey(desc)) {
             needsBridge = true;
+            explicitFound = true;
             break;
           }
         }
+
+        // Check Default (If no explicit annotation and it's a reference type)
+        if (!explicitFound && !paramTypes[i].isPrimitive() && defaultTarget != null) {
+          needsBridge = true;
+        }
+
+        if (needsBridge) break;
       }
 
       if (needsBridge) {
@@ -207,8 +247,6 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
 
   private void emitBridge(ClassBuilder builder, Method parentMethod) {
     String methodName = parentMethod.getName();
-
-    // FIX: Use JDK APIs instead of ASM
     MethodTypeDesc desc =
         MethodTypeDesc.of(
             ClassDesc.ofDescriptor(parentMethod.getReturnType().descriptorString()),
@@ -233,6 +271,9 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
                   TypeKind type =
                       TypeKind.from(ClassDesc.ofDescriptor(paramTypes[i].descriptorString()));
 
+                  boolean checkGenerated = false;
+
+                  // A. Check Explicit Annotations
                   for (java.lang.annotation.Annotation anno : allAnnos[i]) {
                     String annoDesc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
                     TargetAnnotation target = targets.get(annoDesc);
@@ -242,8 +283,19 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
                           codeBuilder,
                           type,
                           "Parameter " + i + " in inherited method " + methodName);
+                      checkGenerated = true;
                     }
                   }
+
+                  // B. Check Default (Strict Mode for Unchecked Inheritance)
+                  if (!checkGenerated && type == TypeKind.REFERENCE && defaultTarget != null) {
+                    codeBuilder.aload(slotIndex);
+                    defaultTarget.check(
+                        codeBuilder,
+                        type,
+                        "Unannotated Parameter " + i + " in inherited method " + methodName);
+                  }
+
                   slotIndex += type.slotSize();
                 }
 

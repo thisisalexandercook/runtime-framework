@@ -43,7 +43,7 @@ public class RuntimeTransformer implements ClassFileTransformer {
     try {
       ClassFile cf = ClassFile.of();
       ClassModel classModel = cf.parse(classfileBuffer);
-      RuntimeInstrumenter instrumenter = checker.getInstrumenter();
+      RuntimeInstrumenter instrumenter = checker.getInstrumenter(filter);
       return cf.transformClass(classModel, instrumenter.asClassTransform(classModel, loader));
 
     } catch (Exception e) {
