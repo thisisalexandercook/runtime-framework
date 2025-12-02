@@ -28,27 +28,34 @@ public class RuntimeTransformer implements ClassFileTransformer {
       ProtectionDomain protectionDomain,
       byte[] classfileBuffer) {
 
-    // 1. Wrap context
-    ClassInfo info = new ClassInfo(className, loader, module);
-
-    // 2. Check Filter
-    if (!filter.test(info)) {
+    // IGNORE JDK INTERNALS to avoid crashing the console
+    if (className != null
+        && (className.startsWith("java/")
+            || className.startsWith("sun/")
+            || className.startsWith("jdk/")
+            || className.startsWith("org/gradle"))) {
       return null;
     }
 
-    // 3. Output matched class
-    System.out.println("[RuntimeFramework] Filter matched: " + className);
-
-    // 4. Perform transform
     try {
+      ClassInfo info = new ClassInfo(className, loader, module);
+      boolean accepted = filter.test(info);
+
+      if (!accepted) {
+        System.out.println("[RuntimeFramework] -> REJECTED by filter");
+        return null;
+      }
+
+      System.out.println("[RuntimeFramework] -> ACCEPTED. Instrumenting...");
+
       ClassFile cf = ClassFile.of();
       ClassModel classModel = cf.parse(classfileBuffer);
       RuntimeInstrumenter instrumenter = checker.getInstrumenter(filter);
       return cf.transformClass(classModel, instrumenter.asClassTransform(classModel, loader));
 
-    } catch (Exception e) {
-      System.err.println("[RuntimeFramework] Failed to parse: " + className);
-      e.printStackTrace();
+    } catch (Throwable t) {
+      System.err.println("[RuntimeFramework] CRASH transforming: " + className);
+      t.printStackTrace();
       return null;
     }
   }
