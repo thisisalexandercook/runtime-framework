@@ -14,7 +14,7 @@ public class NullnessRuntimeChecker extends RuntimeChecker {
 
   @Override
   public String getName() {
-    return "Nullness Runtime Checker";
+    return "nullness";
   }
 
   @Override

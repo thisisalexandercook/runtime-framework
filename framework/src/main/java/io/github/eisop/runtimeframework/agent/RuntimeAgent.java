@@ -11,34 +11,38 @@ import java.util.Arrays;
 public final class RuntimeAgent {
 
   public static void premain(String args, Instrumentation inst) {
-    // 1. Safety Filter (Always active to protect JDK/Framework)
+    // 1. Safety Filter
     Filter<ClassInfo> safeFilter = new FrameworkSafetyFilter();
+    Filter<ClassInfo> policyFilter = safeFilter;
+    Filter<ClassInfo> scanFilter = safeFilter;
 
-    // 2. Defaults
-    Filter<ClassInfo> policyFilter = safeFilter; // "Checked" scope
-    Filter<ClassInfo> scanFilter = safeFilter; // "Instrumentation" scope
-
-    // 3. User Configuration: Checked List
+    // 2. Configuration Flags
     String checkedClasses = System.getProperty("runtime.classes");
+    boolean isGlobalMode = Boolean.getBoolean("runtime.global");
+    boolean trustAnnotatedFor = Boolean.getBoolean("runtime.trustAnnotatedFor");
+
     if (checkedClasses != null && !checkedClasses.isBlank()) {
       System.out.println("[RuntimeAgent] Checked Scope restricted to: " + checkedClasses);
       Filter<ClassInfo> listFilter = new ClassListFilter(Arrays.asList(checkedClasses.split(",")));
 
-      // Policy: Must be Safe AND in List
+      // Policy: Must be Safe AND in the Checked List
       policyFilter = info -> safeFilter.test(info) && listFilter.test(info);
-      // Default Scan: Matches Policy
-      scanFilter = policyFilter;
+
+      if (trustAnnotatedFor) {
+        System.out.println(
+            "[RuntimeAgent] Auto-Discovery Enabled. Scanning all safe classes for annotations.");
+        scanFilter = safeFilter;
+      } else {
+        scanFilter = policyFilter;
+      }
     }
 
-    // 4. User Configuration: Global Mode
-    // If enabled, we scan EVERYTHING safe, even if it's not in the Checked List.
-    // This allows us to instrument LegacyLib to catch writes to Checked code.
-    if (Boolean.getBoolean("runtime.global")) {
+    if (isGlobalMode) {
       System.out.println("[RuntimeAgent] Global Mode ENABLED. Scanning all safe classes.");
       scanFilter = safeFilter;
     }
 
-    // 5. Load Checker
+    // 3. Load Checker
     String checkerClassName =
         System.getProperty(
             "runtime.checker", "io.github.eisop.runtimeframework.util.SysOutRuntimeChecker");
@@ -55,6 +59,8 @@ public final class RuntimeAgent {
       return;
     }
 
-    inst.addTransformer(new RuntimeTransformer(scanFilter, policyFilter, checker), false);
+    // 4. Register with new flag
+    inst.addTransformer(
+        new RuntimeTransformer(scanFilter, policyFilter, checker, trustAnnotatedFor), false);
   }
 }
