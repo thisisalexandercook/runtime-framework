@@ -11,11 +11,15 @@ import java.security.ProtectionDomain;
 
 public class RuntimeTransformer implements ClassFileTransformer {
 
-  private final Filter<ClassInfo> filter;
+  private final Filter<ClassInfo> scanFilter; // Which classes do we parse/instrument?
+  private final Filter<ClassInfo>
+      policyFilter; // Which classes are considered "Checked" by the policy?
   private final RuntimeChecker checker;
 
-  public RuntimeTransformer(Filter<ClassInfo> filter, RuntimeChecker checker) {
-    this.filter = filter;
+  public RuntimeTransformer(
+      Filter<ClassInfo> scanFilter, Filter<ClassInfo> policyFilter, RuntimeChecker checker) {
+    this.scanFilter = scanFilter;
+    this.policyFilter = policyFilter;
     this.checker = checker;
   }
 
@@ -28,7 +32,7 @@ public class RuntimeTransformer implements ClassFileTransformer {
       ProtectionDomain protectionDomain,
       byte[] classfileBuffer) {
 
-    // IGNORE JDK INTERNALS to avoid crashing the console
+    // Skip JDK internals to avoid boot loop issues
     if (className != null
         && (className.startsWith("java/")
             || className.startsWith("sun/")
@@ -37,20 +41,23 @@ public class RuntimeTransformer implements ClassFileTransformer {
       return null;
     }
 
+    ClassInfo info = new ClassInfo(className, loader, module);
+
+    // 1. Check Scanning Scope
+    if (!scanFilter.test(info)) {
+      return null;
+    }
+
+    System.out.println("[RuntimeFramework] Processing: " + className);
+
     try {
-      ClassInfo info = new ClassInfo(className, loader, module);
-      boolean accepted = filter.test(info);
-
-      if (!accepted) {
-        System.out.println("[RuntimeFramework] -> REJECTED by filter");
-        return null;
-      }
-
-      System.out.println("[RuntimeFramework] -> ACCEPTED. Instrumenting...");
-
       ClassFile cf = ClassFile.of();
       ClassModel classModel = cf.parse(classfileBuffer);
-      RuntimeInstrumenter instrumenter = checker.getInstrumenter(filter);
+
+      // 2. Pass the POLICY filter to the instrumenter factory
+      // The instrumenter will use this to distinguish Checked vs Unchecked
+      RuntimeInstrumenter instrumenter = checker.getInstrumenter(policyFilter);
+
       return cf.transformClass(classModel, instrumenter.asClassTransform(classModel, loader));
 
     } catch (Throwable t) {

@@ -1,5 +1,7 @@
 package io.github.eisop.runtimeframework.core;
 
+import io.github.eisop.runtimeframework.filter.ClassInfo;
+import io.github.eisop.runtimeframework.filter.Filter;
 import java.lang.classfile.ClassBuilder;
 import java.lang.classfile.ClassElement;
 import java.lang.classfile.ClassModel;
@@ -11,16 +13,24 @@ import java.lang.classfile.Opcode;
 import java.lang.classfile.TypeKind;
 import java.lang.classfile.attribute.CodeAttribute;
 import java.lang.classfile.instruction.FieldInstruction;
-import java.lang.classfile.instruction.InvokeInstruction; // <--- NEW
+import java.lang.classfile.instruction.InvokeInstruction;
 import java.lang.classfile.instruction.ReturnInstruction;
 import java.lang.constant.MethodTypeDesc;
 import java.lang.reflect.Modifier;
 
 public abstract class RuntimeInstrumenter {
 
-  public RuntimeInstrumenter() {}
+  protected final Filter<ClassInfo> scopeFilter;
+
+  protected RuntimeInstrumenter(Filter<ClassInfo> scopeFilter) {
+    this.scopeFilter = scopeFilter;
+  }
 
   public ClassTransform asClassTransform(ClassModel classModel, ClassLoader loader) {
+    // 1. Determine Scope for this class
+    boolean isCheckedScope =
+        scopeFilter.test(new ClassInfo(classModel.thisClass().asInternalName(), loader, null));
+
     return new ClassTransform() {
       @Override
       public void accept(ClassBuilder classBuilder, ClassElement classElement) {
@@ -31,24 +41,41 @@ public abstract class RuntimeInstrumenter {
                 if (methodElement instanceof CodeAttribute codeModel) {
                   methodBuilder.withCode(
                       codeBuilder -> {
-                        instrumentMethodEntry(codeBuilder, methodModel);
+
+                        // GATE: Only check parameters if we are in Checked Code
+                        if (isCheckedScope) {
+                          instrumentMethodEntry(codeBuilder, methodModel);
+                        }
+
                         for (CodeElement element : codeModel) {
                           if (element instanceof FieldInstruction fInst) {
                             if (isFieldWrite(fInst)) {
+                              // Always check writes (Handles Global Write Protection)
                               generateFieldWriteCheck(codeBuilder, fInst, classModel);
                               codeBuilder.with(element);
                             } else if (isFieldRead(fInst)) {
                               codeBuilder.with(element);
-                              generateFieldReadCheck(codeBuilder, fInst, classModel);
+                              // GATE: Only check reads if we are in Checked Code
+                              if (isCheckedScope) {
+                                generateFieldReadCheck(codeBuilder, fInst, classModel);
+                              }
                             }
                           } else if (element instanceof ReturnInstruction rInst) {
-                            generateReturnCheck(codeBuilder, rInst, methodModel);
+                            // SPLIT: Checked Return vs. Unchecked Override Return
+                            if (isCheckedScope) {
+                              generateReturnCheck(codeBuilder, rInst, methodModel);
+                            } else {
+                              // Pass ClassLoader to help resolve hierarchy
+                              generateUncheckedReturnCheck(
+                                  codeBuilder, rInst, methodModel, classModel, loader);
+                            }
                             codeBuilder.with(element);
-                          } else if (element instanceof InvokeInstruction invoke) { // <--- NEW HOOK
-                            // 1. Write the original call
+                          } else if (element instanceof InvokeInstruction invoke) {
                             codeBuilder.with(element);
-                            // 2. Check the result (if applicable)
-                            generateMethodCallCheck(codeBuilder, invoke);
+                            // GATE: Only check calls if we are in Checked Code
+                            if (isCheckedScope) {
+                              generateMethodCallCheck(codeBuilder, invoke);
+                            }
                           } else {
                             codeBuilder.with(element);
                           }
@@ -65,16 +92,19 @@ public abstract class RuntimeInstrumenter {
 
       @Override
       public void atEnd(ClassBuilder builder) {
-        generateBridgeMethods(builder, classModel, loader);
+        // GATE: Only generate bridges if we are in Checked Code
+        if (isCheckedScope) {
+          generateBridgeMethods(builder, classModel, loader);
+        }
       }
     };
   }
 
-  private boolean isFieldWrite(FieldInstruction f) {
+  protected boolean isFieldWrite(FieldInstruction f) {
     return f.opcode() == Opcode.PUTFIELD || f.opcode() == Opcode.PUTSTATIC;
   }
 
-  private boolean isFieldRead(FieldInstruction f) {
+  protected boolean isFieldRead(FieldInstruction f) {
     return f.opcode() == Opcode.GETFIELD || f.opcode() == Opcode.GETSTATIC;
   }
 
@@ -105,7 +135,14 @@ public abstract class RuntimeInstrumenter {
   protected abstract void generateReturnCheck(
       CodeBuilder b, ReturnInstruction ret, MethodModel method);
 
-  // NEW HOOK: Triggered immediately after INVOKEVIRTUAL/STATIC/INTERFACE etc.
+  // NEW: Hook for Unchecked classes overriding Checked methods
+  protected abstract void generateUncheckedReturnCheck(
+      CodeBuilder b,
+      ReturnInstruction ret,
+      MethodModel method,
+      ClassModel classModel,
+      ClassLoader loader);
+
   protected abstract void generateMethodCallCheck(CodeBuilder b, InvokeInstruction invoke);
 
   protected abstract void generateBridgeMethods(

@@ -11,23 +11,34 @@ import java.util.Arrays;
 public final class RuntimeAgent {
 
   public static void premain(String args, Instrumentation inst) {
-    // 1. Base Safety Filter (Always active to protect JDK/Agent classes)
-    Filter<ClassInfo> activeFilter = new FrameworkSafetyFilter();
+    // 1. Safety Filter (Always active to protect JDK/Framework)
+    Filter<ClassInfo> safeFilter = new FrameworkSafetyFilter();
 
-    // 2. Optional Checked List (Controlled by -Druntime.classes=com.Foo,com.Bar)
-    // Renamed from 'allowedClasses' to 'checkedClasses' to match the concept of Checked Code.
+    // 2. Defaults
+    Filter<ClassInfo> policyFilter = safeFilter; // "Checked" scope
+    Filter<ClassInfo> scanFilter = safeFilter; // "Instrumentation" scope
+
+    // 3. User Configuration: Checked List
     String checkedClasses = System.getProperty("runtime.classes");
     if (checkedClasses != null && !checkedClasses.isBlank()) {
-      System.out.println("[RuntimeAgent] Restricting instrumentation to: " + checkedClasses);
+      System.out.println("[RuntimeAgent] Checked Scope restricted to: " + checkedClasses);
+      Filter<ClassInfo> listFilter = new ClassListFilter(Arrays.asList(checkedClasses.split(",")));
 
-      Filter<ClassInfo> checkedList = new ClassListFilter(Arrays.asList(checkedClasses.split(",")));
-
-      // Composition: Must be Safe AND in the Checked List
-      Filter<ClassInfo> safety = activeFilter;
-      activeFilter = info -> safety.test(info) && checkedList.test(info);
+      // Policy: Must be Safe AND in List
+      policyFilter = info -> safeFilter.test(info) && listFilter.test(info);
+      // Default Scan: Matches Policy
+      scanFilter = policyFilter;
     }
 
-    // 3. Load Checker
+    // 4. User Configuration: Global Mode
+    // If enabled, we scan EVERYTHING safe, even if it's not in the Checked List.
+    // This allows us to instrument LegacyLib to catch writes to Checked code.
+    if (Boolean.getBoolean("runtime.global")) {
+      System.out.println("[RuntimeAgent] Global Mode ENABLED. Scanning all safe classes.");
+      scanFilter = safeFilter;
+    }
+
+    // 5. Load Checker
     String checkerClassName =
         System.getProperty(
             "runtime.checker", "io.github.eisop.runtimeframework.util.SysOutRuntimeChecker");
@@ -44,7 +55,6 @@ public final class RuntimeAgent {
       return;
     }
 
-    // 4. Register
-    inst.addTransformer(new RuntimeTransformer(activeFilter, checker), false);
+    inst.addTransformer(new RuntimeTransformer(scanFilter, policyFilter, checker), false);
   }
 }

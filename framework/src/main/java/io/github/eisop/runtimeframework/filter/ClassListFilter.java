@@ -18,7 +18,6 @@ public final class ClassListFilter implements Filter<ClassInfo> {
             .filter(Objects::nonNull)
             .map(ClassListFilter::toInternalName)
             .collect(Collectors.toUnmodifiableSet());
-
   }
 
   @Override

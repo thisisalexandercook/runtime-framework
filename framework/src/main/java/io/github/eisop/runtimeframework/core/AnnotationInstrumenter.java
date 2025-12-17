@@ -1,5 +1,9 @@
 package io.github.eisop.runtimeframework.core;
 
+import io.github.eisop.runtimeframework.filter.ClassInfo;
+import io.github.eisop.runtimeframework.filter.Filter;
+import io.github.eisop.runtimeframework.policy.EnforcementPolicy;
+import io.github.eisop.runtimeframework.resolution.HierarchyResolver;
 import java.lang.classfile.ClassBuilder;
 import java.lang.classfile.ClassModel;
 import java.lang.classfile.CodeBuilder;
@@ -20,10 +24,16 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
   private final EnforcementPolicy policy;
   private final HierarchyResolver hierarchyResolver;
 
-  public AnnotationInstrumenter(EnforcementPolicy policy, HierarchyResolver hierarchyResolver) {
+  public AnnotationInstrumenter(
+      EnforcementPolicy policy,
+      HierarchyResolver hierarchyResolver,
+      Filter<ClassInfo> safetyFilter) {
+    super(safetyFilter); // Pass filter to base class
     this.policy = policy;
     this.hierarchyResolver = hierarchyResolver;
   }
+
+  // --- Hooks ---
 
   @Override
   protected void generateParameterCheck(
@@ -38,13 +48,22 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
   @Override
   protected void generateFieldWriteCheck(
       CodeBuilder b, FieldInstruction field, ClassModel classModel) {
-    if (!field.owner().asInternalName().equals(classModel.thisClass().asInternalName())) return;
-
-    FieldModel targetField = findField(classModel, field);
-    if (targetField == null) return;
-
+    TargetAnnotation target = null;
     TypeKind type = TypeKind.fromDescriptor(field.typeSymbol().descriptorString());
-    TargetAnnotation target = policy.getFieldWriteCheck(targetField, type);
+
+    // A. Internal Write (this.field = val)
+    if (field.owner().asInternalName().equals(classModel.thisClass().asInternalName())) {
+      FieldModel targetField = findField(classModel, field);
+      if (targetField != null) {
+        target = policy.getFieldWriteCheck(targetField, type);
+      }
+    }
+    // B. External Write (other.field = val) - Crucial for Global Policy
+    else {
+      target =
+          policy.getBoundaryFieldWriteCheck(
+              field.owner().asInternalName(), field.name().stringValue(), type);
+    }
 
     if (target != null) {
       if (field.opcode() == Opcode.PUTSTATIC) {
@@ -93,6 +112,32 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
   }
 
   @Override
+  protected void generateUncheckedReturnCheck(
+      CodeBuilder b,
+      ReturnInstruction ret,
+      MethodModel method,
+      ClassModel classModel,
+      ClassLoader loader) {
+    if (ret.opcode() != Opcode.ARETURN) return;
+
+    // Find if we are overriding a method from a CHECKED parent
+    String checkedParent = findCheckedOverriddenMethod(classModel, method, loader);
+
+    if (checkedParent != null) {
+      TargetAnnotation target =
+          policy.getBoundaryMethodOverrideReturnCheck(checkedParent, method.methodTypeSymbol());
+
+      if (target != null) {
+        b.dup();
+        target.check(
+            b,
+            TypeKind.REFERENCE,
+            "Return value of overridden method " + method.methodName().stringValue());
+      }
+    }
+  }
+
+  @Override
   protected void generateMethodCallCheck(CodeBuilder b, InvokeInstruction invoke) {
     TargetAnnotation target =
         policy.getBoundaryCallCheck(invoke.owner().asInternalName(), invoke.typeSymbol());
@@ -111,6 +156,8 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
       }
     }
   }
+
+  // --- Helpers ---
 
   private void emitBridge(ClassBuilder builder, Method parentMethod) {
     String methodName = parentMethod.getName();
@@ -131,11 +178,9 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
                 int slotIndex = 1;
                 Class<?>[] paramTypes = parentMethod.getParameterTypes();
 
-                // 1. Checks
                 for (int i = 0; i < paramTypes.length; i++) {
                   TypeKind type =
                       TypeKind.from(ClassDesc.ofDescriptor(paramTypes[i].descriptorString()));
-
                   TargetAnnotation target = policy.getBridgeParameterCheck(parentMethod, i);
                   if (target != null) {
                     codeBuilder.aload(slotIndex);
@@ -145,7 +190,6 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
                   slotIndex += type.slotSize();
                 }
 
-                // 2. Super Call
                 codeBuilder.aload(0);
                 slotIndex = 1;
                 for (Class<?> pType : paramTypes) {
@@ -156,11 +200,50 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
 
                 ClassDesc parentDesc = ClassDesc.of(parentMethod.getDeclaringClass().getName());
                 codeBuilder.invokespecial(parentDesc, methodName, desc);
-
-                // 3. Return
                 returnResult(codeBuilder, parentMethod.getReturnType());
               });
         });
+  }
+
+  private String findCheckedOverriddenMethod(
+      ClassModel classModel, MethodModel method, ClassLoader loader) {
+    String superName =
+        classModel.superclass().map(sc -> sc.asInternalName().replace('/', '.')).orElse(null);
+    if (superName == null || superName.equals("java.lang.Object")) return null;
+
+    try {
+      Class<?> parent = Class.forName(superName, false, loader);
+      while (parent != null && parent != Object.class) {
+        String internalName = parent.getName().replace('.', '/');
+
+        // Use the PROTECTED scopeFilter from the base class
+        if (scopeFilter.test(new ClassInfo(internalName, null, null))) {
+          for (Method m : parent.getDeclaredMethods()) {
+            if (m.getName().equals(method.methodName().stringValue())) {
+              String methodDesc = method.methodTypeSymbol().descriptorString();
+              String parentDesc = getMethodDescriptor(m);
+              if (methodDesc.equals(parentDesc)) {
+                return internalName;
+              }
+            }
+          }
+        }
+        parent = parent.getSuperclass();
+      }
+    } catch (Exception e) {
+      System.out.println("here");
+    }
+    return null;
+  }
+
+  private String getMethodDescriptor(Method m) {
+    StringBuilder sb = new StringBuilder("(");
+    for (Class<?> p : m.getParameterTypes()) {
+      sb.append(ClassDesc.ofDescriptor(p.descriptorString()).descriptorString());
+    }
+    sb.append(")");
+    sb.append(ClassDesc.ofDescriptor(m.getReturnType().descriptorString()).descriptorString());
+    return sb.toString();
   }
 
   private FieldModel findField(ClassModel classModel, FieldInstruction field) {
