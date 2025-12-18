@@ -11,6 +11,8 @@ import java.lang.classfile.FieldModel;
 import java.lang.classfile.MethodModel;
 import java.lang.classfile.Opcode;
 import java.lang.classfile.TypeKind;
+import java.lang.classfile.instruction.ArrayLoadInstruction;
+import java.lang.classfile.instruction.ArrayStoreInstruction;
 import java.lang.classfile.instruction.FieldInstruction;
 import java.lang.classfile.instruction.InvokeInstruction;
 import java.lang.classfile.instruction.ReturnInstruction;
@@ -34,6 +36,35 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
   }
 
   // --- Hooks ---
+
+  @Override
+  protected void generateArrayStoreCheck(CodeBuilder b, ArrayStoreInstruction instruction) {
+    // We only support Reference Arrays (AASTORE) for nullness checking
+    if (instruction.opcode() == Opcode.AASTORE) {
+      TargetAnnotation target = policy.getArrayStoreCheck(TypeKind.REFERENCE);
+      if (target != null) {
+        // Stack: [..., arrayRef, index, value]
+        // We need to check 'value' without consuming it.
+        b.dup();
+        // Stack: [..., arrayRef, index, value, value]
+        target.check(b, TypeKind.REFERENCE, "Array Element Write");
+        // Stack: [..., arrayRef, index, value] -> Ready for AASTORE
+      }
+    }
+  }
+
+  @Override
+  protected void generateArrayLoadCheck(CodeBuilder b, ArrayLoadInstruction instruction) {
+    // We only support Reference Arrays (AALOAD)
+    if (instruction.opcode() == Opcode.AALOAD) {
+      TargetAnnotation target = policy.getArrayLoadCheck(TypeKind.REFERENCE);
+      if (target != null) {
+        // Stack: [..., value] (Instruction has already executed)
+        b.dup();
+        target.check(b, TypeKind.REFERENCE, "Array Element Read");
+      }
+    }
+  }
 
   @Override
   protected void generateParameterCheck(

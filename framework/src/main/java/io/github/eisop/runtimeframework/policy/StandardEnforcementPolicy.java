@@ -61,17 +61,13 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
     return findTarget(getFieldAnnotations(field));
   }
 
-  @Override
-  public TargetAnnotation getReturnCheck(MethodModel method) {
-    TargetAnnotation explicit = findTarget(getMethodReturnAnnotations(method));
-    if (explicit != null) return explicit;
-
-    TypeKind returnKind = TypeKind.from(method.methodTypeSymbol().returnType());
-    if (returnKind == TypeKind.REFERENCE) {
-      return defaultTarget;
+    @Override
+    public TargetAnnotation getReturnCheck(MethodModel method) {
+        // POLICY CHANGE: Trust internal code.
+        // We assume the compiler ensured that a method returning @NonNull actually returns a non-null value.
+        // We only check boundaries (Calls/Overrides) or Inputs (Params/Reads).
+        return null;
     }
-    return null;
-  }
 
   // --- 2. Boundary Logic ---
 
@@ -190,4 +186,27 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
             });
     return result;
   }
+
+    @Override
+    public TargetAnnotation getArrayLoadCheck(TypeKind componentType) {
+        // Enforce strict defaults on array reads (Defense in Depth).
+        // Since arrays can be aliased and modified by Unchecked code (Heap Pollution),
+        // we check values upon retrieval to ensure they match our NonNull expectation.
+        if (componentType == TypeKind.REFERENCE) {
+            return defaultTarget;
+        }
+        return null;
+    }
+
+    @Override
+    public TargetAnnotation getArrayStoreCheck(TypeKind componentType) {
+        // Enforce strict defaults for arrays in Checked code.
+        // We assume all Reference arrays in Checked code are NonNull by default.
+        // This prevents Checked code from poisoning its own arrays (or shared arrays) with null.
+        if (componentType == TypeKind.REFERENCE) {
+            return defaultTarget;
+        }
+        return null;
+    }
+
 }

@@ -60,4 +60,10 @@ public interface EnforcementPolicy {
 
   /** For a bridge we are generating, what check applies to this parameter? */
   TargetAnnotation getBridgeParameterCheck(Method parentMethod, int paramIndex);
+
+  /** Should we check an value being stored into an array? */
+  TargetAnnotation getArrayStoreCheck(TypeKind componentType);
+
+  /** Should we check a value being read from an array? */
+  TargetAnnotation getArrayLoadCheck(TypeKind componentType);
 }

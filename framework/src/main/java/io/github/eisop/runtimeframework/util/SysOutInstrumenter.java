@@ -6,6 +6,8 @@ import java.lang.classfile.ClassModel;
 import java.lang.classfile.CodeBuilder;
 import java.lang.classfile.MethodModel;
 import java.lang.classfile.TypeKind;
+import java.lang.classfile.instruction.ArrayLoadInstruction;
+import java.lang.classfile.instruction.ArrayStoreInstruction;
 import java.lang.classfile.instruction.FieldInstruction;
 import java.lang.classfile.instruction.InvokeInstruction;
 import java.lang.classfile.instruction.ReturnInstruction;
@@ -81,5 +83,15 @@ public class SysOutInstrumenter extends RuntimeInstrumenter {
     // Debug instrumenter does not generate bridges, but we can log that the hook was hit
     // System.out.println("[SysOutInstrumenter] Bridge hook triggered for: " +
     // model.thisClass().asInternalName());
+  }
+
+  @Override
+  protected void generateArrayLoadCheck(CodeBuilder b, ArrayLoadInstruction instruction) {
+    print(b, "   [Array Load] Reading from array");
+  }
+
+  @Override
+  protected void generateArrayStoreCheck(CodeBuilder b, ArrayStoreInstruction instruction) {
+    print(b, "   [Array Store] Writing to array");
   }
 }

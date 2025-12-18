@@ -12,6 +12,8 @@ import java.lang.classfile.MethodModel;
 import java.lang.classfile.Opcode;
 import java.lang.classfile.TypeKind;
 import java.lang.classfile.attribute.CodeAttribute;
+import java.lang.classfile.instruction.ArrayLoadInstruction;
+import java.lang.classfile.instruction.ArrayStoreInstruction;
 import java.lang.classfile.instruction.FieldInstruction;
 import java.lang.classfile.instruction.InvokeInstruction;
 import java.lang.classfile.instruction.ReturnInstruction;
@@ -61,20 +63,30 @@ public abstract class RuntimeInstrumenter {
                               }
                             }
                           } else if (element instanceof ReturnInstruction rInst) {
-                            // SPLIT: Checked Return vs. Unchecked Override Return
                             if (isCheckedScope) {
                               generateReturnCheck(codeBuilder, rInst, methodModel);
                             } else {
-                              // Pass ClassLoader to help resolve hierarchy
                               generateUncheckedReturnCheck(
                                   codeBuilder, rInst, methodModel, classModel, loader);
                             }
                             codeBuilder.with(element);
                           } else if (element instanceof InvokeInstruction invoke) {
                             codeBuilder.with(element);
-                            // GATE: Only check calls if we are in Checked Code
                             if (isCheckedScope) {
                               generateMethodCallCheck(codeBuilder, invoke);
+                            }
+                          } else if (element instanceof ArrayStoreInstruction astore) {
+                            // NEW: Array Stores
+                            // UNGATED: We check all array writes.
+                            // If Unchecked code writes to a Reference array, we check it.
+                            generateArrayStoreCheck(codeBuilder, astore);
+                            codeBuilder.with(element);
+                          } else if (element instanceof ArrayLoadInstruction aload) {
+                            // NEW: Array Loads
+                            codeBuilder.with(element);
+                            // GATE: Only check reads if we are in Checked Code (Defense in Depth)
+                            if (isCheckedScope) {
+                              generateArrayLoadCheck(codeBuilder, aload);
                             }
                           } else {
                             codeBuilder.with(element);
@@ -135,7 +147,6 @@ public abstract class RuntimeInstrumenter {
   protected abstract void generateReturnCheck(
       CodeBuilder b, ReturnInstruction ret, MethodModel method);
 
-  // NEW: Hook for Unchecked classes overriding Checked methods
   protected abstract void generateUncheckedReturnCheck(
       CodeBuilder b,
       ReturnInstruction ret,
@@ -147,4 +158,8 @@ public abstract class RuntimeInstrumenter {
 
   protected abstract void generateBridgeMethods(
       ClassBuilder builder, ClassModel model, ClassLoader loader);
+
+  protected abstract void generateArrayStoreCheck(CodeBuilder b, ArrayStoreInstruction instruction);
+
+  protected abstract void generateArrayLoadCheck(CodeBuilder b, ArrayLoadInstruction instruction);
 }
