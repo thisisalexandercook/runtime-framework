@@ -1,5 +1,6 @@
 package io.github.eisop.runtimeframework.policy;
 
+import io.github.eisop.runtimeframework.core.OptOutAnnotation;
 import io.github.eisop.runtimeframework.core.TargetAnnotation;
 import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.filter.Filter;
@@ -16,43 +17,70 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
-/** The standard policy for Annotation-Driven Runtime Verification. */
 public class StandardEnforcementPolicy implements EnforcementPolicy {
 
   protected final Map<String, TargetAnnotation> targets;
+  protected final Set<String> optOutDescriptors;
   protected final TargetAnnotation defaultTarget;
   protected final Filter<ClassInfo> safetyFilter;
 
   public StandardEnforcementPolicy(
-      Collection<TargetAnnotation> targetAnnotations, Filter<ClassInfo> safetyFilter) {
+      Collection<TargetAnnotation> targetAnnotations,
+      Collection<OptOutAnnotation> optOutAnnotations,
+      Filter<ClassInfo> safetyFilter) {
+
     this.targets =
         targetAnnotations.stream()
             .collect(Collectors.toMap(t -> t.annotationType().descriptorString(), t -> t));
+
+    this.optOutDescriptors =
+        optOutAnnotations.stream()
+            .map(o -> o.annotationType().descriptorString())
+            .collect(Collectors.toSet());
+
     this.defaultTarget = targetAnnotations.stream().findFirst().orElse(null);
     this.safetyFilter = safetyFilter;
   }
 
   private TargetAnnotation findTarget(List<Annotation> annotations) {
     for (Annotation a : annotations) {
-      TargetAnnotation t = targets.get(a.classSymbol().descriptorString());
+      String desc = a.classSymbol().descriptorString();
+      TargetAnnotation t = targets.get(desc);
       if (t != null) return t;
     }
     return null;
   }
 
+  private boolean hasOptOutAnnotation(List<Annotation> annotations) {
+    for (Annotation a : annotations) {
+      if (optOutDescriptors.contains(a.classSymbol().descriptorString())) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // --- 1. Internal Logic ---
+
   @Override
   public TargetAnnotation getParameterCheck(MethodModel method, int paramIndex, TypeKind type) {
     if (type != TypeKind.REFERENCE) return null;
-    TargetAnnotation explicit = findTarget(getMethodParamAnnotations(method, paramIndex));
+    List<Annotation> annos = getMethodParamAnnotations(method, paramIndex);
+
+    TargetAnnotation explicit = findTarget(annos);
     if (explicit != null) return explicit;
+
+    if (hasOptOutAnnotation(annos)) return null;
+
     return defaultTarget;
   }
 
   @Override
   public TargetAnnotation getFieldWriteCheck(FieldModel field, TypeKind type) {
-    return null;
+    return null; // Trust internal code
   }
 
   @Override
@@ -61,13 +89,28 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
     return findTarget(getFieldAnnotations(field));
   }
 
-    @Override
-    public TargetAnnotation getReturnCheck(MethodModel method) {
-        // POLICY CHANGE: Trust internal code.
-        // We assume the compiler ensured that a method returning @NonNull actually returns a non-null value.
-        // We only check boundaries (Calls/Overrides) or Inputs (Params/Reads).
-        return null;
+  @Override
+  public TargetAnnotation getReturnCheck(MethodModel method) {
+    return null; // Trust internal code
+  }
+
+  // --- Array Logic ---
+
+  @Override
+  public TargetAnnotation getArrayStoreCheck(TypeKind componentType) {
+    if (componentType == TypeKind.REFERENCE) {
+      return defaultTarget;
     }
+    return null;
+  }
+
+  @Override
+  public TargetAnnotation getArrayLoadCheck(TypeKind componentType) {
+    if (componentType == TypeKind.REFERENCE) {
+      return defaultTarget;
+    }
+    return null;
+  }
 
   // --- 2. Boundary Logic ---
 
@@ -95,6 +138,7 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
 
   @Override
   public boolean shouldGenerateBridge(Method parentMethod) {
+    if (parentMethod.getDeclaringClass() == Object.class) return false;
     Class<?>[] paramTypes = parentMethod.getParameterTypes();
     java.lang.annotation.Annotation[][] paramAnnos = parentMethod.getParameterAnnotations();
 
@@ -103,9 +147,18 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
         String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
         if (targets.containsKey(desc)) return true;
       }
+
       ClassDesc pTypeDesc = ClassDesc.ofDescriptor(paramTypes[i].descriptorString());
       if (TypeKind.from(pTypeDesc) == TypeKind.REFERENCE && defaultTarget != null) {
-        return true;
+        boolean isOptedOut = false;
+        for (java.lang.annotation.Annotation anno : paramAnnos[i]) {
+          String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
+          if (optOutDescriptors.contains(desc)) {
+            isOptedOut = true;
+            break;
+          }
+        }
+        if (!isOptedOut) return true;
       }
     }
     return false;
@@ -122,6 +175,11 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
       if (t != null) return t;
     }
 
+    for (java.lang.annotation.Annotation anno : annos) {
+      String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
+      if (optOutDescriptors.contains(desc)) return null;
+    }
+
     ClassDesc pTypeDesc = ClassDesc.ofDescriptor(paramType.descriptorString());
     if (TypeKind.from(pTypeDesc) == TypeKind.REFERENCE) {
       return defaultTarget;
@@ -129,6 +187,7 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
     return null;
   }
 
+  // --- Parsing Helpers ---
   private List<Annotation> getMethodParamAnnotations(MethodModel method, int paramIndex) {
     List<Annotation> result = new ArrayList<>();
     method
@@ -144,9 +203,7 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
             attr -> {
               for (TypeAnnotation ta : attr.annotations()) {
                 if (ta.targetInfo() instanceof TypeAnnotation.FormalParameterTarget pt
-                    && pt.formalParameterIndex() == paramIndex) {
-                  result.add(ta.annotation());
-                }
+                    && pt.formalParameterIndex() == paramIndex) result.add(ta.annotation());
               }
             });
     return result;
@@ -157,13 +214,13 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
     field
         .findAttribute(Attributes.runtimeVisibleAnnotations())
         .ifPresent(attr -> result.addAll(attr.annotations()));
-
     field
         .findAttribute(Attributes.runtimeVisibleTypeAnnotations())
         .ifPresent(
             attr -> {
               for (TypeAnnotation ta : attr.annotations()) {
-                if (ta.targetInfo() instanceof TypeAnnotation.EmptyTarget) {
+                // FIX: Use enum comparison for Field type annotations
+                if (ta.targetInfo().targetType() == TypeAnnotation.TargetType.FIELD) {
                   result.add(ta.annotation());
                 }
               }
@@ -186,27 +243,4 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
             });
     return result;
   }
-
-    @Override
-    public TargetAnnotation getArrayLoadCheck(TypeKind componentType) {
-        // Enforce strict defaults on array reads (Defense in Depth).
-        // Since arrays can be aliased and modified by Unchecked code (Heap Pollution),
-        // we check values upon retrieval to ensure they match our NonNull expectation.
-        if (componentType == TypeKind.REFERENCE) {
-            return defaultTarget;
-        }
-        return null;
-    }
-
-    @Override
-    public TargetAnnotation getArrayStoreCheck(TypeKind componentType) {
-        // Enforce strict defaults for arrays in Checked code.
-        // We assume all Reference arrays in Checked code are NonNull by default.
-        // This prevents Checked code from poisoning its own arrays (or shared arrays) with null.
-        if (componentType == TypeKind.REFERENCE) {
-            return defaultTarget;
-        }
-        return null;
-    }
-
 }

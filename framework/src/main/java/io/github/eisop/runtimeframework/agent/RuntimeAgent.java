@@ -5,6 +5,8 @@ import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.filter.ClassListFilter;
 import io.github.eisop.runtimeframework.filter.Filter;
 import io.github.eisop.runtimeframework.filter.FrameworkSafetyFilter;
+import io.github.eisop.runtimeframework.runtime.RuntimeVerifier;
+import io.github.eisop.runtimeframework.runtime.ViolationHandler;
 import java.lang.instrument.Instrumentation;
 import java.util.Arrays;
 
@@ -28,11 +30,14 @@ public final class RuntimeAgent {
       // Policy: Must be Safe AND in the Checked List
       policyFilter = info -> safeFilter.test(info) && listFilter.test(info);
 
+      // Scan Logic:
+      // If 'trustAnnotatedFor' is true, we MUST scan all safe classes to look for the annotation.
       if (trustAnnotatedFor) {
         System.out.println(
             "[RuntimeAgent] Auto-Discovery Enabled. Scanning all safe classes for annotations.");
         scanFilter = safeFilter;
       } else {
+        // Otherwise, optimization: Only scan what is explicitly checked
         scanFilter = policyFilter;
       }
     }
@@ -42,7 +47,22 @@ public final class RuntimeAgent {
       scanFilter = safeFilter;
     }
 
-    // 3. Load Checker
+    // 3. Configure Violation Handler (NEW)
+    String handlerClassName = System.getProperty("runtime.handler");
+    if (handlerClassName != null && !handlerClassName.isBlank()) {
+      try {
+        System.out.println("[RuntimeAgent] Setting ViolationHandler: " + handlerClassName);
+        Class<?> handlerClass = Class.forName(handlerClassName);
+        ViolationHandler handler = (ViolationHandler) handlerClass.getConstructor().newInstance();
+        RuntimeVerifier.setViolationHandler(handler);
+      } catch (Exception e) {
+        System.err.println(
+            "[RuntimeAgent] ERROR: Could not instantiate handler: " + handlerClassName);
+        e.printStackTrace();
+      }
+    }
+
+    // 4. Load Checker
     String checkerClassName =
         System.getProperty(
             "runtime.checker", "io.github.eisop.runtimeframework.util.SysOutRuntimeChecker");
@@ -59,7 +79,7 @@ public final class RuntimeAgent {
       return;
     }
 
-    // 4. Register with new flag
+    // 5. Register
     inst.addTransformer(
         new RuntimeTransformer(scanFilter, policyFilter, checker, trustAnnotatedFor), false);
   }

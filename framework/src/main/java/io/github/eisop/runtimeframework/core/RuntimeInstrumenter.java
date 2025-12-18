@@ -8,6 +8,7 @@ import java.lang.classfile.ClassModel;
 import java.lang.classfile.ClassTransform;
 import java.lang.classfile.CodeBuilder;
 import java.lang.classfile.CodeElement;
+import java.lang.classfile.Instruction; // Added Import for fail-safe check
 import java.lang.classfile.MethodModel;
 import java.lang.classfile.Opcode;
 import java.lang.classfile.TypeKind;
@@ -16,6 +17,7 @@ import java.lang.classfile.instruction.ArrayLoadInstruction;
 import java.lang.classfile.instruction.ArrayStoreInstruction;
 import java.lang.classfile.instruction.FieldInstruction;
 import java.lang.classfile.instruction.InvokeInstruction;
+import java.lang.classfile.instruction.LineNumber; // Added Import
 import java.lang.classfile.instruction.ReturnInstruction;
 import java.lang.constant.MethodTypeDesc;
 import java.lang.reflect.Modifier;
@@ -29,7 +31,6 @@ public abstract class RuntimeInstrumenter {
   }
 
   public ClassTransform asClassTransform(ClassModel classModel, ClassLoader loader) {
-    // 1. Determine Scope for this class
     boolean isCheckedScope =
         scopeFilter.test(new ClassInfo(classModel.thisClass().asInternalName(), loader, null));
 
@@ -44,20 +45,37 @@ public abstract class RuntimeInstrumenter {
                   methodBuilder.withCode(
                       codeBuilder -> {
 
-                        // GATE: Only check parameters if we are in Checked Code
-                        if (isCheckedScope) {
-                          instrumentMethodEntry(codeBuilder, methodModel);
-                        }
+                        // State flag to ensure we inject entry checks exactly once
+                        // If not checked scope, we mark as done immediately.
+                        boolean entryChecksDone = !isCheckedScope;
 
                         for (CodeElement element : codeModel) {
+                          // DEBUG INFO FIX:
+                          // Inject entry checks AFTER the first LineNumber table entry.
+                          // This ensures the injected code inherits the line number of the method
+                          // start,
+                          // preventing "Line -1" in stack traces.
+                          if (!entryChecksDone && element instanceof LineNumber) {
+                            codeBuilder.with(element); // Write the LineNumber first
+                            instrumentMethodEntry(codeBuilder, methodModel);
+                            entryChecksDone = true;
+                            continue; // Continue loop to avoid writing element twice or triggering
+                            // other logic
+                          }
+
+                          // Fail-safe: If we hit a real Instruction and haven't injected yet
+                          // (e.g. class compiled without -g has no LineNumbers), inject now.
+                          if (!entryChecksDone && element instanceof Instruction) {
+                            instrumentMethodEntry(codeBuilder, methodModel);
+                            entryChecksDone = true;
+                          }
+
                           if (element instanceof FieldInstruction fInst) {
                             if (isFieldWrite(fInst)) {
-                              // Always check writes (Handles Global Write Protection)
                               generateFieldWriteCheck(codeBuilder, fInst, classModel);
                               codeBuilder.with(element);
                             } else if (isFieldRead(fInst)) {
                               codeBuilder.with(element);
-                              // GATE: Only check reads if we are in Checked Code
                               if (isCheckedScope) {
                                 generateFieldReadCheck(codeBuilder, fInst, classModel);
                               }
@@ -76,21 +94,24 @@ public abstract class RuntimeInstrumenter {
                               generateMethodCallCheck(codeBuilder, invoke);
                             }
                           } else if (element instanceof ArrayStoreInstruction astore) {
-                            // NEW: Array Stores
-                            // UNGATED: We check all array writes.
-                            // If Unchecked code writes to a Reference array, we check it.
                             generateArrayStoreCheck(codeBuilder, astore);
                             codeBuilder.with(element);
                           } else if (element instanceof ArrayLoadInstruction aload) {
-                            // NEW: Array Loads
                             codeBuilder.with(element);
-                            // GATE: Only check reads if we are in Checked Code (Defense in Depth)
                             if (isCheckedScope) {
                               generateArrayLoadCheck(codeBuilder, aload);
                             }
                           } else {
                             codeBuilder.with(element);
                           }
+                        }
+
+                        // Edge Case: Empty methods or methods with only labels might miss the loop
+                        // check.
+                        // Ensure checks are injected if they haven't been (unlikely in valid
+                        // methods).
+                        if (!entryChecksDone && isCheckedScope) {
+                          instrumentMethodEntry(codeBuilder, methodModel);
                         }
                       });
                 } else {
@@ -104,7 +125,6 @@ public abstract class RuntimeInstrumenter {
 
       @Override
       public void atEnd(ClassBuilder builder) {
-        // GATE: Only generate bridges if we are in Checked Code
         if (isCheckedScope) {
           generateBridgeMethods(builder, classModel, loader);
         }

@@ -35,12 +35,15 @@ public abstract class RuntimeChecker {
    * @return A configured EnforcementPolicy (Standard or Global).
    */
   protected EnforcementPolicy createPolicy(
-      Collection<TargetAnnotation> targets, Filter<ClassInfo> filter) {
+      Collection<TargetAnnotation> targets,
+      Collection<OptOutAnnotation> optOuts,
+      Filter<ClassInfo> filter) {
+
     boolean isGlobalMode = Boolean.getBoolean("runtime.global");
     if (isGlobalMode) {
-      return new GlobalEnforcementPolicy(targets, filter);
+      return new GlobalEnforcementPolicy(targets, optOuts, filter);
     } else {
-      return new StandardEnforcementPolicy(targets, filter);
+      return new StandardEnforcementPolicy(targets, optOuts, filter);
     }
   }
 }
