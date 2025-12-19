@@ -6,10 +6,23 @@ import org.junit.jupiter.api.Test;
 public class NullnessDirectoryTest extends RuntimeTestRunner {
 
   @Test
-  public void testBasicScenarios() throws Exception {
-    // This looks for files in src/test/resources/test-cases/nullness-basic
+  public void testParameterScenarios() throws Exception {
     runDirectoryTest(
-        "nullness-basic",
+        "nullness-parameter",
+        "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker");
+  }
+
+  @Test
+  public void testBoundaryScenarios() throws Exception {
+    runDirectoryTest(
+        "nullness-boundary",
+        "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker");
+  }
+
+  @Test
+  public void testFieldScenarios() throws Exception {
+    runDirectoryTest(
+        "nullness-fields",
         "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker");
   }
 }

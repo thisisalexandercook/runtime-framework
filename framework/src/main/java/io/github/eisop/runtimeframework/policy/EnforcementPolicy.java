@@ -66,4 +66,6 @@ public interface EnforcementPolicy {
 
   /** Should we check a value being read from an array? */
   TargetAnnotation getArrayLoadCheck(TypeKind componentType);
+
+  TargetAnnotation getLocalVariableWriteCheck(MethodModel method, int slot, TypeKind type);
 }

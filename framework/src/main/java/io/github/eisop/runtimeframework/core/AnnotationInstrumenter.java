@@ -16,6 +16,7 @@ import java.lang.classfile.instruction.ArrayStoreInstruction;
 import java.lang.classfile.instruction.FieldInstruction;
 import java.lang.classfile.instruction.InvokeInstruction;
 import java.lang.classfile.instruction.ReturnInstruction;
+import java.lang.classfile.instruction.StoreInstruction;
 import java.lang.constant.ClassDesc;
 import java.lang.constant.MethodTypeDesc;
 import java.lang.reflect.Method;
@@ -170,13 +171,8 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
 
   @Override
   protected void generateMethodCallCheck(CodeBuilder b, InvokeInstruction invoke) {
-    TargetAnnotation target =
-        policy.getBoundaryCallCheck(invoke.owner().asInternalName(), invoke.typeSymbol());
-    if (target != null) {
-      b.dup();
-      target.check(
-          b, TypeKind.REFERENCE, "Result from unchecked method " + invoke.name().stringValue());
-    }
+    // empty for now, only need to generate checks when a method call is stored somehwhere
+
   }
 
   @Override
@@ -185,6 +181,26 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
       if (policy.shouldGenerateBridge(parentMethod)) {
         emitBridge(builder, parentMethod);
       }
+    }
+  }
+
+  @Override
+  protected void generateStoreCheck(
+      CodeBuilder b, StoreInstruction instruction, MethodModel method) {
+    boolean isRefStore =
+        switch (instruction.opcode()) {
+          case ASTORE, ASTORE_0, ASTORE_1, ASTORE_2, ASTORE_3 -> true;
+          default -> false;
+        };
+
+    if (!isRefStore) return;
+
+    int slot = instruction.slot();
+    TargetAnnotation target = policy.getLocalVariableWriteCheck(method, slot, TypeKind.REFERENCE);
+
+    if (target != null) {
+      b.dup();
+      target.check(b, TypeKind.REFERENCE, "Local Variable Assignment (Slot " + slot + ")");
     }
   }
 

@@ -11,6 +11,7 @@ import java.lang.classfile.instruction.ArrayStoreInstruction;
 import java.lang.classfile.instruction.FieldInstruction;
 import java.lang.classfile.instruction.InvokeInstruction;
 import java.lang.classfile.instruction.ReturnInstruction;
+import java.lang.classfile.instruction.StoreInstruction;
 import java.lang.constant.ClassDesc;
 import java.lang.constant.MethodTypeDesc;
 
@@ -93,5 +94,11 @@ public class SysOutInstrumenter extends RuntimeInstrumenter {
   @Override
   protected void generateArrayStoreCheck(CodeBuilder b, ArrayStoreInstruction instruction) {
     print(b, "   [Array Store] Writing to array");
+  }
+
+  @Override
+  protected void generateStoreCheck(
+      CodeBuilder b, StoreInstruction instruction, MethodModel method) {
+    print(b, "   [Local Store] Writing to slot " + instruction.slot());
   }
 }

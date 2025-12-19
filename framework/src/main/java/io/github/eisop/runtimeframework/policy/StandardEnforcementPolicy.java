@@ -72,7 +72,6 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
 
     TargetAnnotation explicit = findTarget(annos);
     if (explicit != null) return explicit;
-
     if (hasOptOutAnnotation(annos)) return null;
 
     return defaultTarget;
@@ -86,12 +85,30 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
   @Override
   public TargetAnnotation getFieldReadCheck(FieldModel field, TypeKind type) {
     if (type != TypeKind.REFERENCE) return null;
-    return findTarget(getFieldAnnotations(field));
+    List<Annotation> annos = getFieldAnnotations(field);
+    TargetAnnotation explicit = findTarget(annos);
+    if (explicit != null) return explicit;
+    if (hasOptOutAnnotation(annos)) return null;
+    return defaultTarget;
   }
 
   @Override
   public TargetAnnotation getReturnCheck(MethodModel method) {
     return null; // Trust internal code
+  }
+
+  @Override
+  public TargetAnnotation getLocalVariableWriteCheck(MethodModel method, int slot, TypeKind type) {
+    if (type != TypeKind.REFERENCE) return null;
+
+    // Scan for annotations on this local variable slot
+    List<Annotation> annos = getLocalVariableAnnotations(method, slot);
+
+    TargetAnnotation explicit = findTarget(annos);
+    if (explicit != null) return explicit;
+    if (hasOptOutAnnotation(annos)) return null;
+
+    return defaultTarget;
   }
 
   // --- Array Logic ---
@@ -219,7 +236,6 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
         .ifPresent(
             attr -> {
               for (TypeAnnotation ta : attr.annotations()) {
-                // FIX: Use enum comparison for Field type annotations
                 if (ta.targetInfo().targetType() == TypeAnnotation.TargetType.FIELD) {
                   result.add(ta.annotation());
                 }
@@ -240,6 +256,29 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
                   result.add(ta.annotation());
                 }
               }
+            });
+    return result;
+  }
+
+  private List<Annotation> getLocalVariableAnnotations(MethodModel method, int slot) {
+    List<Annotation> result = new ArrayList<>();
+    method
+        .code()
+        .ifPresent(
+            code -> {
+              code.findAttribute(Attributes.runtimeVisibleTypeAnnotations())
+                  .ifPresent(
+                      attr -> {
+                        for (TypeAnnotation ta : attr.annotations()) {
+                          if (ta.targetInfo() instanceof TypeAnnotation.LocalVarTarget localVar) {
+                            for (TypeAnnotation.LocalVarTargetInfo info : localVar.table()) {
+                              if (info.index() == slot) {
+                                result.add(ta.annotation());
+                              }
+                            }
+                          }
+                        }
+                      });
             });
     return result;
   }
