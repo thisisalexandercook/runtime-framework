@@ -9,20 +9,31 @@ public class NullnessDirectoryTest extends RuntimeTestRunner {
   public void testParameterScenarios() throws Exception {
     runDirectoryTest(
         "nullness-parameter",
-        "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker");
+        "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker",
+        false);
   }
 
   @Test
   public void testBoundaryScenarios() throws Exception {
     runDirectoryTest(
         "nullness-boundary",
-        "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker");
+        "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker",
+        false);
   }
 
   @Test
-  public void testFieldScenarios() throws Exception {
+  public void testFieldReadScenarios() throws Exception {
     runDirectoryTest(
-        "nullness-fields",
-        "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker");
+        "nullness-field-read",
+        "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker",
+        false);
+  }
+
+  @Test
+  public void testFieldWriteScenarios() throws Exception {
+    runDirectoryTest(
+        "nullness-field-write",
+        "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker",
+        true);
   }
 }
