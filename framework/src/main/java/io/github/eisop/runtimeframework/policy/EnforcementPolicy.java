@@ -50,7 +50,7 @@ public interface EnforcementPolicy {
   /** We are calling a method on 'owner'. Should we check the result? */
   TargetAnnotation getBoundaryCallCheck(String owner, MethodTypeDesc desc);
 
-  /** We are reading a field from an EXTERNAL class. Should we check the value? */
+  /** We are reading field from an EXTERNAL class. Should we check the value? */
   TargetAnnotation getBoundaryFieldReadCheck(String owner, String fieldName, TypeKind type);
 
   // --- 3. Inheritance Logic (Bridges) ---

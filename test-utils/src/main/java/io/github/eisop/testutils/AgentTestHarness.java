@@ -2,6 +2,7 @@ package io.github.eisop.testutils;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -17,13 +18,9 @@ public abstract class AgentTestHarness {
   protected Path distDir;
 
   protected void setup() throws IOException {
-    // Create a temp directory for this test run
     this.tempDir = Files.createTempDirectory("eisop-agent-test");
-
-    // Locate the dist directory passed from Gradle
     String distPath = System.getProperty("agent.dist.dir");
     if (distPath == null) {
-      // Fallback for running in IDE without Gradle context, assuming standard build layout
       Path potentialDist =
           Path.of(System.getProperty("user.dir")).resolve("../build/dist").normalize();
       if (Files.exists(potentialDist)) {
@@ -36,10 +33,10 @@ public abstract class AgentTestHarness {
     this.distDir = Path.of(distPath);
   }
 
+  @SuppressWarnings("EmptyCatch")
   protected void cleanup() throws IOException {
-    // Recursive delete
     try (Stream<Path> walk = Files.walk(tempDir)) {
-      walk.sorted((a, b) -> b.compareTo(a)) // Delete leaves first
+      walk.sorted((a, b) -> b.compareTo(a))
           .forEach(
               p -> {
                 try {
@@ -50,19 +47,10 @@ public abstract class AgentTestHarness {
     }
   }
 
-  // --- Helper to copy test resources ---
-
-  /**
-   * Copies a test source file from src/test/resources/test-cases/ to the temp directory.
-   *
-   * @param resourcePath relative path in test-cases (e.g. "dispatch/Runner.java")
-   */
   protected void copyTestFile(String resourcePath) throws IOException {
-    // Load from classpath resources
     String fullPath = "test-cases/" + resourcePath;
     try (InputStream is = getClass().getClassLoader().getResourceAsStream(fullPath)) {
       if (is == null) {
-        // Try looking in file system directly (useful if resources aren't copied yet by IDE)
         Path fsPath = Path.of("src/test/resources/" + fullPath);
         if (Files.exists(fsPath)) {
           copyFileFromDisk(fsPath, resourcePath);
@@ -70,7 +58,6 @@ public abstract class AgentTestHarness {
         }
         throw new IOException("Test resource not found: " + fullPath);
       }
-
       Path dest = tempDir.resolve(resourcePath);
       Files.createDirectories(dest.getParent());
       Files.copy(is, dest, StandardCopyOption.REPLACE_EXISTING);
@@ -83,14 +70,11 @@ public abstract class AgentTestHarness {
     Files.copy(source, dest, StandardCopyOption.REPLACE_EXISTING);
   }
 
-  // Keep this for simple ad-hoc tests if needed
   protected void writeSource(String filename, String content) throws IOException {
     Path file = tempDir.resolve(filename);
     Files.createDirectories(file.getParent());
     Files.writeString(file, content, StandardOpenOption.CREATE);
   }
-
-  // --- Compilation ---
 
   protected void compile(List<String> filenames) throws Exception {
     compile(filenames.toArray(String[]::new));
@@ -101,15 +85,20 @@ public abstract class AgentTestHarness {
   }
 
   protected void compileWithClasspath(String extraClasspath, String... filenames) throws Exception {
-    // Find checker-qual jar
     Path qualJar = findJar("checker-qual");
-    String cp = qualJar.toAbsolutePath().toString();
+    // FIX: Include framework.jar so that @AnnotatedFor and other runtime annotations resolve
+    Path frameworkJar = findJar("framework");
+
+    String cp =
+        qualJar.toAbsolutePath().toString() + ":" + frameworkJar.toAbsolutePath().toString();
+
     if (extraClasspath != null) {
       cp += ":" + extraClasspath;
     }
 
     List<String> cmd = new ArrayList<>();
     cmd.add("javac");
+    cmd.add("-g");
     cmd.add("-cp");
     cmd.add(cp);
     cmd.add("-d");
@@ -122,8 +111,6 @@ public abstract class AgentTestHarness {
     runProcess(cmd, "Compilation");
   }
 
-  // --- Execution ---
-
   protected TestResult runAgent(String mainClass, String... agentArgs) throws Exception {
     return runAgent(mainClass, false, agentArgs);
   }
@@ -133,10 +120,8 @@ public abstract class AgentTestHarness {
     Path frameworkJar = findJar("framework");
     Path checkerJar = findJar("checker");
     Path qualJar = findJar("checker-qual");
-    // We likely need test-utils jar on the classpath for the TestViolationHandler
     Path testUtilsJar = findJar("test-utils");
 
-    // Build Classpath (Agent Jars + Test Classes + Test Utils)
     String cp =
         "."
             + ":"
@@ -157,9 +142,7 @@ public abstract class AgentTestHarness {
       cmd.add("-Druntime.global=true");
     }
 
-    // Add agent arguments (e.g. -Druntime.classes=...)
     cmd.addAll(List.of(agentArgs));
-
     cmd.add("-cp");
     cmd.add(cp);
     cmd.add(mainClass);
@@ -183,12 +166,10 @@ public abstract class AgentTestHarness {
   private TestResult runProcess(List<String> cmd, String taskName) throws Exception {
     ProcessBuilder pb = new ProcessBuilder(cmd);
     pb.directory(tempDir.toFile());
-
     Process p = pb.start();
 
-    // Read output
-    String stdout = new String(p.getInputStream().readAllBytes());
-    String stderr = new String(p.getErrorStream().readAllBytes());
+    String stdout = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+    String stderr = new String(p.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
 
     boolean finished = p.waitFor(10, TimeUnit.SECONDS);
     if (!finished) {

@@ -1,7 +1,9 @@
 import org.checkerframework.checker.nullness.qual.Nullable;
 import org.checkerframework.checker.nullness.qual.NonNull;
+import io.github.eisop.runtimeframework.qual.AnnotatedFor;
 
-public class StaticWrite {
+@AnnotatedFor("nullness")
+public class StaticWrite{
     
     public static @Nullable String nullableData = "don't care";
     public static @NonNull String nonNullData = "safe";

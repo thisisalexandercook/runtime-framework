@@ -1,3 +1,6 @@
+import io.github.eisop.runtimeframework.qual.AnnotatedFor;
+
+@AnnotatedFor("nullness")
 public class InstanceBoundary {
 
     static class UncheckedLib {

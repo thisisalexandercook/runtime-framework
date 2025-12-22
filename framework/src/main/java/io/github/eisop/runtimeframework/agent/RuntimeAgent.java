@@ -23,31 +23,31 @@ public final class RuntimeAgent {
     boolean isGlobalMode = Boolean.getBoolean("runtime.global");
     boolean trustAnnotatedFor = Boolean.getBoolean("runtime.trustAnnotatedFor");
 
+    // Logic for Policy Filter (Who is Checked?)
     if (checkedClasses != null && !checkedClasses.isBlank()) {
       System.out.println("[RuntimeAgent] Checked Scope restricted to: " + checkedClasses);
       Filter<ClassInfo> listFilter = new ClassListFilter(Arrays.asList(checkedClasses.split(",")));
-
-      // Policy: Must be Safe AND in the Checked List
       policyFilter = info -> safeFilter.test(info) && listFilter.test(info);
-
-      // Scan Logic:
-      // If 'trustAnnotatedFor' is true, we MUST scan all safe classes to look for the annotation.
-      if (trustAnnotatedFor) {
-        System.out.println(
-            "[RuntimeAgent] Auto-Discovery Enabled. Scanning all safe classes for annotations.");
-        scanFilter = safeFilter;
-      } else {
-        // Otherwise, optimization: Only scan what is explicitly checked
-        scanFilter = policyFilter;
-      }
+    } else if (trustAnnotatedFor) {
+      // New logic: If relying on annotations and no list is provided, default to Empty Set.
+      // This allows @AnnotatedFor to be the sole mechanism for opting in classes as Checked.
+      policyFilter = info -> false;
     }
 
-    if (isGlobalMode) {
+    // Logic for Scan Filter (Who do we parse?)
+    if (trustAnnotatedFor) {
+      System.out.println(
+          "[RuntimeAgent] Auto-Discovery Enabled. Scanning all safe classes for annotations.");
+      scanFilter = safeFilter;
+    } else if (isGlobalMode) {
       System.out.println("[RuntimeAgent] Global Mode ENABLED. Scanning all safe classes.");
       scanFilter = safeFilter;
+    } else if (checkedClasses != null) {
+      // Optimization: Only scan what is explicitly checked
+      scanFilter = policyFilter;
     }
 
-    // 3. Configure Violation Handler (NEW)
+    // 3. Configure Violation Handler
     String handlerClassName = System.getProperty("runtime.handler");
     if (handlerClassName != null && !handlerClassName.isBlank()) {
       try {

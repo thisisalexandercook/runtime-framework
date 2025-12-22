@@ -26,14 +26,16 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
 
   private final EnforcementPolicy policy;
   private final HierarchyResolver hierarchyResolver;
+  private final Filter<ClassInfo> safetyFilter;
 
   public AnnotationInstrumenter(
       EnforcementPolicy policy,
       HierarchyResolver hierarchyResolver,
       Filter<ClassInfo> safetyFilter) {
-    super(safetyFilter); // Pass filter to base class
+    super(safetyFilter);
     this.policy = policy;
     this.hierarchyResolver = hierarchyResolver;
+    this.safetyFilter = safetyFilter;
   }
 
   // --- Hooks ---
@@ -152,7 +154,6 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
       ClassLoader loader) {
     if (ret.opcode() != Opcode.ARETURN) return;
 
-    // Find if we are overriding a method from a CHECKED parent
     String checkedParent = findCheckedOverriddenMethod(classModel, method, loader);
 
     if (checkedParent != null) {
@@ -262,14 +263,28 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
       Class<?> parent = Class.forName(superName, false, loader);
       while (parent != null && parent != Object.class) {
         String internalName = parent.getName().replace('.', '/');
+        boolean isChecked = safetyFilter.test(new ClassInfo(internalName, null, null));
+        if (!isChecked) {
+          for (java.lang.annotation.Annotation anno : parent.getAnnotations()) {
+            if (anno.annotationType()
+                .getName()
+                .equals("io.github.eisop.runtimeframework.qual.AnnotatedFor")) {
+              isChecked = true;
+              System.out.println("DEBUG: Found @AnnotatedFor on " + internalName);
+              break;
+            }
+          }
+        } else {
+          System.out.println("DEBUG: Parent " + internalName + " is explicitly checked via filter");
+        }
 
-        // Use the PROTECTED scopeFilter from the base class
-        if (scopeFilter.test(new ClassInfo(internalName, null, null))) {
+        if (isChecked) {
           for (Method m : parent.getDeclaredMethods()) {
             if (m.getName().equals(method.methodName().stringValue())) {
               String methodDesc = method.methodTypeSymbol().descriptorString();
               String parentDesc = getMethodDescriptor(m);
               if (methodDesc.equals(parentDesc)) {
+                System.out.println("DEBUG: Found matched method in " + internalName);
                 return internalName;
               }
             }
@@ -278,7 +293,8 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
         parent = parent.getSuperclass();
       }
     } catch (Exception e) {
-      System.out.println("here");
+      System.err.println("DEBUG: Error in findCheckedOverriddenMethod: " + e);
+      e.printStackTrace();
     }
     return null;
   }

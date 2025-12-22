@@ -20,24 +20,25 @@ public class GlobalEnforcementPolicy extends StandardEnforcementPolicy {
   @Override
   public TargetAnnotation getBoundaryFieldWriteCheck(
       String owner, String fieldName, TypeKind type) {
-    // GLOBAL LOGIC:
-    // We are currently in Unchecked Code (Legacy).
-    // We are writing to 'owner'.
+    // GLOBAL LOGIC: Legacy code writing to 'owner'.
 
     // 1. Is the Target Class (owner) Checked?
-    boolean isTargetChecked = safetyFilter.test(new ClassInfo(owner, null, null));
+    boolean checked = isClassChecked(owner);
+    // System.out.println("DEBUG: getBoundaryFieldWriteCheck owner=" + owner + " checked=" +
+    // checked);
 
-    // 2. Is it a Reference?
-    if (isTargetChecked && type == TypeKind.REFERENCE) {
+    if (checked) {
+      // 2. Is it a Reference?
+      if (type == TypeKind.REFERENCE) {
 
-      // 3. Check for Opt-Outs (e.g. @Nullable) on the target field
-      // Since we don't have the ClassModel for 'owner', we try to resolve it via Reflection.
-      if (isFieldOptOut(owner, fieldName)) {
-        return null; // Field allows nulls, so don't check.
+        // 3. Check for Opt-Outs (e.g. @Nullable) on the target field
+        if (isFieldOptOut(owner, fieldName)) {
+          return null; // Field allows nulls, so don't check.
+        }
+
+        // 4. Default to Strict
+        return super.defaultTarget;
       }
-
-      // 4. Default to Strict
-      return super.defaultTarget;
     }
 
     return null;
@@ -77,15 +78,33 @@ public class GlobalEnforcementPolicy extends StandardEnforcementPolicy {
 
   @Override
   public TargetAnnotation getBoundaryMethodOverrideReturnCheck(String owner, MethodTypeDesc desc) {
-    boolean isParentChecked = safetyFilter.test(new ClassInfo(owner, null, null));
+
     TypeKind returnType = TypeKind.from(desc.returnType());
 
-    if (isParentChecked && returnType == TypeKind.REFERENCE) {
-      // Note: Ideally we should perform similar reflection here to check if the
-      // Parent method return type is @Nullable.
-      // For now, we keep the strict default.
+    if (returnType == TypeKind.REFERENCE) {
       return super.defaultTarget;
     }
     return null;
+  }
+
+  private boolean isClassChecked(String internalName) {
+    if (safetyFilter.test(new ClassInfo(internalName, null, null))) {
+      return true;
+    }
+    try {
+      String className = internalName.replace('/', '.');
+      ClassLoader cl = Thread.currentThread().getContextClassLoader();
+      Class<?> clazz = Class.forName(className, false, cl);
+      for (java.lang.annotation.Annotation anno : clazz.getAnnotations()) {
+        if (anno.annotationType()
+            .getName()
+            .equals("io.github.eisop.runtimeframework.qual.AnnotatedFor")) {
+          return true;
+        }
+      }
+    } catch (Throwable e) {
+      System.out.println("error finding class");
+    }
+    return false;
   }
 }

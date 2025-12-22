@@ -1,5 +1,7 @@
 import org.checkerframework.checker.nullness.qual.Nullable;
+import io.github.eisop.runtimeframework.qual.AnnotatedFor;
 
+@AnnotatedFor("nullness")
 public class InstanceFieldRead {
 
     static class UncheckedLib {

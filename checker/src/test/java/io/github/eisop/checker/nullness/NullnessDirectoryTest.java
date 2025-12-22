@@ -36,4 +36,20 @@ public class NullnessDirectoryTest extends RuntimeTestRunner {
         "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker",
         true);
   }
+
+  @Test
+  public void testBridgeGeneration() throws Exception {
+    runDirectoryTest(
+        "nullness-bridge",
+        "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker",
+        false);
+  }
+
+  @Test
+  public void testGlobalInheritance() throws Exception {
+    runDirectoryTest(
+        "nullness-global-bridge",
+        "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker",
+        true);
+  }
 }

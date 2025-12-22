@@ -23,8 +23,10 @@ public class RuntimeTestRunner extends AgentTestHarness {
       Path resourceDir = Path.of("src/test/resources/" + resourcePath);
 
       if (!Files.exists(resourceDir)) {
+        // Fallback for IDE vs Gradle working directory differences
         resourceDir = Path.of("checker/src/test/resources/" + resourcePath);
       }
+
       if (!Files.exists(resourceDir)) {
         throw new IOException("Test directory not found: " + resourceDir.toAbsolutePath());
       }
@@ -45,13 +47,12 @@ public class RuntimeTestRunner extends AgentTestHarness {
         fileNames.add(fname);
       }
 
-      // 3. Compile ALL files together (handles dependencies)
+      // 3. Compile ALL files
       compile(fileNames);
 
       // 4. Run each file that has a main method
       for (Path sourcePath : javaFiles) {
         String content = Files.readString(sourcePath);
-        // Simple heuristic to avoid running helper classes
         if (content.contains("public static void main")) {
           runSingleTest(sourcePath, checkerClass, isGlobal);
         }
@@ -70,13 +71,16 @@ public class RuntimeTestRunner extends AgentTestHarness {
     String filename = sourcePath.getFileName().toString();
     String mainClass = filename.replace(".java", "");
 
-    // Pass global flag and handler
+    // We define the main class as the "Checked Class" for this test run.
+    // Any other classes needed to be Checked must be marked with @AnnotatedFor
+    // and we enable trustAnnotatedFor to pick them up.
     TestResult result =
         runAgent(
             mainClass,
             isGlobal,
             "-Druntime.checker=" + checkerClass,
-            "-Druntime.classes=" + mainClass, // Always treat the runner as Checked
+            "-Druntime.classes=" + "test",
+            "-Druntime.trustAnnotatedFor=true", // Enable auto-discovery for dependencies
             "-Druntime.handler=io.github.eisop.testutils.TestViolationHandler");
 
     verifyErrors(expectedErrors, result.stdout(), filename);
@@ -88,6 +92,7 @@ public class RuntimeTestRunner extends AgentTestHarness {
     for (int i = 0; i < lines.size(); i++) {
       Matcher m = ERROR_PATTERN.matcher(lines.get(i));
       if (m.find()) {
+        // Line numbers are 1-based
         errors.add(new ExpectedError(i + 1, m.group(1).trim()));
       }
     }
@@ -128,7 +133,7 @@ public class RuntimeTestRunner extends AgentTestHarness {
           for (ExpectedError exp : unmatchedExpected) {
             if (exp.expectedMessage().equals(act.expectedMessage())) {
               long diff = Math.abs(act.lineNumber() - exp.lineNumber());
-              if (diff <= 5) { // Fuzzy matching
+              if (diff <= 5) {
                 bestMatch = exp;
                 break;
               }
@@ -152,7 +157,7 @@ public class RuntimeTestRunner extends AgentTestHarness {
         sb.append("Unexpected Runtime Violations:\n");
         unmatchedActual.forEach(e -> sb.append("  ").append(e).append("\n"));
       }
-      sb.append("\nFull Stdout:\n").append(stdout).append("\n");
+      sb.append("\nFull Output:\n").append(stdout).append("\n");
       System.out.println(sb.toString());
       Assertions.fail("Verification failed. Mismatched errors.");
     }

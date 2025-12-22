@@ -1,3 +1,6 @@
+import io.github.eisop.runtimeframework.qual.AnnotatedFor;
+
+@AnnotatedFor("nullness")
 public class StaticFieldRead {
 
     static class UncheckedLib {

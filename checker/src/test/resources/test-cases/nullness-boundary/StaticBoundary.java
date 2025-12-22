@@ -1,5 +1,7 @@
 import org.checkerframework.checker.nullness.qual.NonNull;
+import io.github.eisop.runtimeframework.qual.AnnotatedFor;
 
+@AnnotatedFor("nullness")
 public class StaticBoundary {
 
     static class UncheckedLib {
