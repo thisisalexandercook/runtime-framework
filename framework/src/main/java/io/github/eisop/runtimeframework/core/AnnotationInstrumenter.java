@@ -147,15 +147,12 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
 
     TargetAnnotation target = policy.getUncheckedOverrideReturnCheck(classModel, method, loader);
     if (target != null) {
-      System.out.println("[DEBUG] Policy returned target for override check.");
-
       b.dup();
       target.check(
           b,
           TypeKind.REFERENCE,
           "Return value of overridden method " + method.methodName().stringValue());
     }
-    System.out.println("[DEBUG] Policy returned NULL for override check.");
   }
 
   @Override
