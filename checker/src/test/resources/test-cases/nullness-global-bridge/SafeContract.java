@@ -6,7 +6,5 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 @AnnotatedFor("nullness")
 public class SafeContract {
     public @NonNull String getValue() { return "Safe"; }
-
-    public @NonNull String getUnsafeValue() { return "Unsafe"; }
-
+    public @Nullable String getUnsafeValue() { return "Unsafe"; }
 }

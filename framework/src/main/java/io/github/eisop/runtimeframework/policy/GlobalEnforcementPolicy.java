@@ -52,7 +52,30 @@ public class GlobalEnforcementPolicy extends StandardEnforcementPolicy {
               String methodDesc = method.methodTypeSymbol().descriptorString();
               String parentDesc = getMethodDescriptor(m);
               if (methodDesc.equals(parentDesc)) {
-                // Found Checked Parent defining this method
+                // Found Checked Parent defining this method.
+
+                // FIX: Check for Opt-Outs on the Parent Method.
+                // We must check BOTH Declaration Annotations (e.g. @Deprecated)
+                // AND Type Annotations on the return type (e.g. @Nullable String).
+
+                // 1. Declaration Annotations
+                for (java.lang.annotation.Annotation anno : m.getAnnotations()) {
+                  String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
+                  if (optOutDescriptors.contains(desc)) {
+                    return null;
+                  }
+                }
+
+                // 2. Type Annotations (Correct place for @Nullable on return)
+                for (java.lang.annotation.Annotation anno :
+                    m.getAnnotatedReturnType().getAnnotations()) {
+                  String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
+                  if (optOutDescriptors.contains(desc)) {
+                    return null;
+                  }
+                }
+
+                // Check strict default
                 TypeKind returnType =
                     TypeKind.from(ClassDesc.ofDescriptor(m.getReturnType().descriptorString()));
                 if (returnType == TypeKind.REFERENCE) {
@@ -65,7 +88,7 @@ public class GlobalEnforcementPolicy extends StandardEnforcementPolicy {
         parent = parent.getSuperclass();
       }
     } catch (Throwable e) {
-      // Ignore
+      System.out.println("fail");
     }
     return null;
   }

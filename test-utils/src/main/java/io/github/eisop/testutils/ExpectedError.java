@@ -1,8 +1,8 @@
 package io.github.eisop.testutils;
 
-public record ExpectedError(long lineNumber, String expectedMessage) {
+public record ExpectedError(String filename, long lineNumber, String expectedMessage) {
   @Override
   public String toString() {
-    return "Line " + lineNumber + ": " + expectedMessage;
+    return filename + ":" + lineNumber + ": " + expectedMessage;
   }
 }

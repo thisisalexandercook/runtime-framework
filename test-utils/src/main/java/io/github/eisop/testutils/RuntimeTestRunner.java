@@ -23,7 +23,6 @@ public class RuntimeTestRunner extends AgentTestHarness {
       Path resourceDir = Path.of("src/test/resources/" + resourcePath);
 
       if (!Files.exists(resourceDir)) {
-        // Fallback for IDE vs Gradle working directory differences
         resourceDir = Path.of("checker/src/test/resources/" + resourcePath);
       }
 
@@ -31,7 +30,6 @@ public class RuntimeTestRunner extends AgentTestHarness {
         throw new IOException("Test directory not found: " + resourceDir.toAbsolutePath());
       }
 
-      // 1. Gather all Java files
       List<Path> javaFiles;
       try (var stream = Files.walk(resourceDir)) {
         javaFiles = stream.filter(p -> p.toString().endsWith(".java")).collect(Collectors.toList());
@@ -39,7 +37,6 @@ public class RuntimeTestRunner extends AgentTestHarness {
 
       if (javaFiles.isEmpty()) return;
 
-      // 2. Copy all files to temp dir
       List<String> fileNames = new ArrayList<>();
       for (Path p : javaFiles) {
         String fname = p.getFileName().toString();
@@ -47,15 +44,22 @@ public class RuntimeTestRunner extends AgentTestHarness {
         fileNames.add(fname);
       }
 
-      // 3. Compile ALL files
       compile(fileNames);
 
-      // 4. Run each file that has a main method
+      List<Path> mainFiles = new ArrayList<>();
+      List<Path> helperFiles = new ArrayList<>();
+
       for (Path sourcePath : javaFiles) {
         String content = Files.readString(sourcePath);
         if (content.contains("public static void main")) {
-          runSingleTest(sourcePath, checkerClass, isGlobal);
+          mainFiles.add(sourcePath);
+        } else {
+          helperFiles.add(sourcePath);
         }
+      }
+
+      for (Path mainSource : mainFiles) {
+        runSingleTest(mainSource, helperFiles, checkerClass, isGlobal);
       }
 
     } finally {
@@ -63,44 +67,46 @@ public class RuntimeTestRunner extends AgentTestHarness {
     }
   }
 
-  private void runSingleTest(Path sourcePath, String checkerClass, boolean isGlobal)
+  private void runSingleTest(
+      Path mainSource, List<Path> helperFiles, String checkerClass, boolean isGlobal)
       throws Exception {
-    System.out.println("Running test: " + sourcePath.getFileName());
-    List<ExpectedError> expectedErrors = parseExpectedErrors(sourcePath);
+    System.out.println("Running test: " + mainSource.getFileName());
 
-    String filename = sourcePath.getFileName().toString();
+    List<ExpectedError> expectedErrors = new ArrayList<>();
+    expectedErrors.addAll(parseExpectedErrors(mainSource));
+    for (Path helper : helperFiles) {
+      expectedErrors.addAll(parseExpectedErrors(helper));
+    }
+
+    String filename = mainSource.getFileName().toString();
     String mainClass = filename.replace(".java", "");
 
-    // We define the main class as the "Checked Class" for this test run.
-    // Any other classes needed to be Checked must be marked with @AnnotatedFor
-    // and we enable trustAnnotatedFor to pick them up.
     TestResult result =
         runAgent(
             mainClass,
             isGlobal,
             "-Druntime.checker=" + checkerClass,
-            "-Druntime.classes=" + "test",
-            "-Druntime.trustAnnotatedFor=true", // Enable auto-discovery for dependencies
+            "-Druntime.trustAnnotatedFor=true",
             "-Druntime.handler=io.github.eisop.testutils.TestViolationHandler");
 
     verifyErrors(expectedErrors, result.stdout(), filename);
   }
 
   private List<ExpectedError> parseExpectedErrors(Path sourceFile) throws IOException {
+    String fileName = sourceFile.getFileName().toString();
     List<String> lines = Files.readAllLines(sourceFile);
     List<ExpectedError> errors = new ArrayList<>();
     for (int i = 0; i < lines.size(); i++) {
       Matcher m = ERROR_PATTERN.matcher(lines.get(i));
       if (m.find()) {
-        // Line numbers are 1-based
-        errors.add(new ExpectedError(i + 1, m.group(1).trim()));
+        errors.add(new ExpectedError(fileName, i + 1, m.group(1).trim()));
       }
     }
     return errors;
   }
 
   @SuppressWarnings("StringSplitter")
-  private void verifyErrors(List<ExpectedError> expected, String stdout, String filename) {
+  private void verifyErrors(List<ExpectedError> expected, String stdout, String testName) {
     List<ExpectedError> actualErrors = new ArrayList<>();
 
     stdout
@@ -108,17 +114,21 @@ public class RuntimeTestRunner extends AgentTestHarness {
         .forEach(
             line -> {
               if (line.startsWith("[VIOLATION]")) {
+                // Format: [VIOLATION] File.java:Line (Checker) Message
                 String[] parts = line.split(" ");
                 if (parts.length > 1) {
                   String fileLoc = parts[1];
                   if (fileLoc.contains(":")) {
                     String[] locParts = fileLoc.split(":");
-                    if (locParts[0].equals(filename)) {
-                      long lineNum = Long.parseLong(locParts[1]);
-                      int msgStart = line.indexOf(") ") + 2;
-                      String msg = (msgStart > 1) ? line.substring(msgStart) : "";
-                      actualErrors.add(new ExpectedError(lineNum, msg.trim()));
-                    }
+                    String errFile = locParts[0];
+                    long lineNum = Long.parseLong(locParts[1]);
+
+                    int msgStart = line.indexOf(") ") + 2;
+                    String msg = (msgStart > 1) ? line.substring(msgStart) : "";
+
+                    // FIX: Added 'true ||' logic implicitly by removing the filename check.
+                    // Now we accept errors from ANY file involved in the test.
+                    actualErrors.add(new ExpectedError(errFile, lineNum, msg.trim()));
                   }
                 }
               }
@@ -131,7 +141,12 @@ public class RuntimeTestRunner extends AgentTestHarness {
         act -> {
           ExpectedError bestMatch = null;
           for (ExpectedError exp : unmatchedExpected) {
+            // 1. Must match Filename
+            if (!exp.filename().equals(act.filename())) continue;
+
+            // 2. Must match Message
             if (exp.expectedMessage().equals(act.expectedMessage())) {
+              // 3. Fuzzy Line Check (+/- 5 lines)
               long diff = Math.abs(act.lineNumber() - exp.lineNumber());
               if (diff <= 5) {
                 bestMatch = exp;
@@ -148,7 +163,7 @@ public class RuntimeTestRunner extends AgentTestHarness {
 
     if (!unmatchedExpected.isEmpty() || !unmatchedActual.isEmpty()) {
       StringBuilder sb = new StringBuilder();
-      sb.append("\n=== TEST FAILED: ").append(filename).append(" ===\n");
+      sb.append("\n=== TEST FAILED: ").append(testName).append(" ===\n");
       if (!unmatchedExpected.isEmpty()) {
         sb.append("Missing Expected Errors:\n");
         unmatchedExpected.forEach(e -> sb.append("  ").append(e).append("\n"));
