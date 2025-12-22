@@ -88,7 +88,7 @@ public class GlobalEnforcementPolicy extends StandardEnforcementPolicy {
         parent = parent.getSuperclass();
       }
     } catch (Throwable e) {
-      System.out.println("fail");
+      System.out.println("reflection fail in method override");
     }
     return null;
   }
@@ -130,6 +130,7 @@ public class GlobalEnforcementPolicy extends StandardEnforcementPolicy {
             "L" + anno.annotationType().getName().replace('.', '/') + ";")) return true;
       }
     } catch (Throwable t) {
+      System.out.println("reflection fail in is field opt out");
     }
     return false;
   }

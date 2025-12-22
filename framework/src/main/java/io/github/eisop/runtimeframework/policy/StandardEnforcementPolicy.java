@@ -244,22 +244,6 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
     return result;
   }
 
-  private List<Annotation> getMethodReturnAnnotations(MethodModel method) {
-    List<Annotation> result = new ArrayList<>();
-    method
-        .findAttribute(Attributes.runtimeVisibleTypeAnnotations())
-        .ifPresent(
-            attr -> {
-              for (TypeAnnotation ta : attr.annotations()) {
-                // FIX: Use enum comparison, not instanceof
-                if (ta.targetInfo().targetType() == TypeAnnotation.TargetType.METHOD_RETURN) {
-                  result.add(ta.annotation());
-                }
-              }
-            });
-    return result;
-  }
-
   private List<Annotation> getLocalVariableAnnotations(MethodModel method, int slot) {
     List<Annotation> result = new ArrayList<>();
     method

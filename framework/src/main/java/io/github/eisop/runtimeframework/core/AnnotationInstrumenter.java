@@ -26,7 +26,6 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
 
   private final EnforcementPolicy policy;
   private final HierarchyResolver hierarchyResolver;
-  private final Filter<ClassInfo> safetyFilter;
 
   public AnnotationInstrumenter(
       EnforcementPolicy policy,
@@ -35,7 +34,6 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
     super(safetyFilter);
     this.policy = policy;
     this.hierarchyResolver = hierarchyResolver;
-    this.safetyFilter = safetyFilter;
   }
 
   @Override
