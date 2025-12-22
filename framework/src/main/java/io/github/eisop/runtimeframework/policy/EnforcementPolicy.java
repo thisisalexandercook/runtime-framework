@@ -1,6 +1,7 @@
 package io.github.eisop.runtimeframework.policy;
 
 import io.github.eisop.runtimeframework.core.TargetAnnotation;
+import java.lang.classfile.ClassModel;
 import java.lang.classfile.FieldModel;
 import java.lang.classfile.MethodModel;
 import java.lang.classfile.TypeKind;
@@ -68,4 +69,9 @@ public interface EnforcementPolicy {
   TargetAnnotation getArrayLoadCheck(TypeKind componentType);
 
   TargetAnnotation getLocalVariableWriteCheck(MethodModel method, int slot, TypeKind type);
+
+  default TargetAnnotation getUncheckedOverrideReturnCheck(
+      ClassModel classModel, MethodModel method, ClassLoader loader) {
+    return null;
+  }
 }

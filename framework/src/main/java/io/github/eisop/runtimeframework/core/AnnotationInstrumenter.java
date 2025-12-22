@@ -154,19 +154,15 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
       ClassLoader loader) {
     if (ret.opcode() != Opcode.ARETURN) return;
 
-    String checkedParent = findCheckedOverriddenMethod(classModel, method, loader);
+    // Delegated to Policy now
+    TargetAnnotation target = policy.getUncheckedOverrideReturnCheck(classModel, method, loader);
 
-    if (checkedParent != null) {
-      TargetAnnotation target =
-          policy.getBoundaryMethodOverrideReturnCheck(checkedParent, method.methodTypeSymbol());
-
-      if (target != null) {
-        b.dup();
-        target.check(
-            b,
-            TypeKind.REFERENCE,
-            "Return value of overridden method " + method.methodName().stringValue());
-      }
+    if (target != null) {
+      b.dup();
+      target.check(
+          b,
+          TypeKind.REFERENCE,
+          "Return value of overridden method " + method.methodName().stringValue());
     }
   }
 
@@ -251,62 +247,6 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
                 returnResult(codeBuilder, parentMethod.getReturnType());
               });
         });
-  }
-
-  private String findCheckedOverriddenMethod(
-      ClassModel classModel, MethodModel method, ClassLoader loader) {
-    String superName =
-        classModel.superclass().map(sc -> sc.asInternalName().replace('/', '.')).orElse(null);
-    if (superName == null || superName.equals("java.lang.Object")) return null;
-
-    try {
-      Class<?> parent = Class.forName(superName, false, loader);
-      while (parent != null && parent != Object.class) {
-        String internalName = parent.getName().replace('.', '/');
-        boolean isChecked = safetyFilter.test(new ClassInfo(internalName, null, null));
-        if (!isChecked) {
-          for (java.lang.annotation.Annotation anno : parent.getAnnotations()) {
-            if (anno.annotationType()
-                .getName()
-                .equals("io.github.eisop.runtimeframework.qual.AnnotatedFor")) {
-              isChecked = true;
-              System.out.println("DEBUG: Found @AnnotatedFor on " + internalName);
-              break;
-            }
-          }
-        } else {
-          System.out.println("DEBUG: Parent " + internalName + " is explicitly checked via filter");
-        }
-
-        if (isChecked) {
-          for (Method m : parent.getDeclaredMethods()) {
-            if (m.getName().equals(method.methodName().stringValue())) {
-              String methodDesc = method.methodTypeSymbol().descriptorString();
-              String parentDesc = getMethodDescriptor(m);
-              if (methodDesc.equals(parentDesc)) {
-                System.out.println("DEBUG: Found matched method in " + internalName);
-                return internalName;
-              }
-            }
-          }
-        }
-        parent = parent.getSuperclass();
-      }
-    } catch (Exception e) {
-      System.err.println("DEBUG: Error in findCheckedOverriddenMethod: " + e);
-      e.printStackTrace();
-    }
-    return null;
-  }
-
-  private String getMethodDescriptor(Method m) {
-    StringBuilder sb = new StringBuilder("(");
-    for (Class<?> p : m.getParameterTypes()) {
-      sb.append(ClassDesc.ofDescriptor(p.descriptorString()).descriptorString());
-    }
-    sb.append(")");
-    sb.append(ClassDesc.ofDescriptor(m.getReturnType().descriptorString()).descriptorString());
-    return sb.toString();
   }
 
   private FieldModel findField(ClassModel classModel, FieldInstruction field) {

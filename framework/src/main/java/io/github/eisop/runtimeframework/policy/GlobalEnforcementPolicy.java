@@ -4,8 +4,11 @@ import io.github.eisop.runtimeframework.core.OptOutAnnotation;
 import io.github.eisop.runtimeframework.core.TargetAnnotation;
 import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.filter.Filter;
+import java.lang.classfile.ClassModel;
+import java.lang.classfile.MethodModel;
 import java.lang.classfile.TypeKind;
-import java.lang.constant.MethodTypeDesc;
+import java.lang.constant.ClassDesc;
+import java.lang.reflect.Method;
 import java.util.Collection;
 
 public class GlobalEnforcementPolicy extends StandardEnforcementPolicy {
@@ -20,69 +23,49 @@ public class GlobalEnforcementPolicy extends StandardEnforcementPolicy {
   @Override
   public TargetAnnotation getBoundaryFieldWriteCheck(
       String owner, String fieldName, TypeKind type) {
-    // GLOBAL LOGIC: Legacy code writing to 'owner'.
-
-    // 1. Is the Target Class (owner) Checked?
-    boolean checked = isClassChecked(owner);
-    // System.out.println("DEBUG: getBoundaryFieldWriteCheck owner=" + owner + " checked=" +
-    // checked);
-
-    if (checked) {
-      // 2. Is it a Reference?
+    if (isClassChecked(owner)) {
       if (type == TypeKind.REFERENCE) {
-
-        // 3. Check for Opt-Outs (e.g. @Nullable) on the target field
         if (isFieldOptOut(owner, fieldName)) {
-          return null; // Field allows nulls, so don't check.
+          return null;
         }
-
-        // 4. Default to Strict
         return super.defaultTarget;
       }
     }
-
     return null;
   }
 
-  private boolean isFieldOptOut(String owner, String fieldName) {
-    try {
-      // Attempt to load the target class to inspect field annotations.
-      // We use the ContextClassLoader as a best-effort resolution strategy.
-      Class<?> clazz =
-          Class.forName(
-              owner.replace('/', '.'), false, Thread.currentThread().getContextClassLoader());
-      java.lang.reflect.Field field = clazz.getDeclaredField(fieldName);
-
-      // Check Declaration Annotations
-      for (java.lang.annotation.Annotation anno : field.getAnnotations()) {
-        String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
-        if (optOutDescriptors.contains(desc)) {
-          return true;
-        }
-      }
-
-      // Check Type Annotations (e.g. @Nullable String)
-      for (java.lang.annotation.Annotation anno : field.getAnnotatedType().getAnnotations()) {
-        String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
-        if (optOutDescriptors.contains(desc)) {
-          return true;
-        }
-      }
-    } catch (Throwable t) {
-      // If resolution fails (class not found, field not found, security, etc.),
-      // we fall back to "False" (Not Opt-Out), which enforces the Strict Check.
-      // This is the safe default.
-    }
-    return false;
-  }
-
   @Override
-  public TargetAnnotation getBoundaryMethodOverrideReturnCheck(String owner, MethodTypeDesc desc) {
+  public TargetAnnotation getUncheckedOverrideReturnCheck(
+      ClassModel classModel, MethodModel method, ClassLoader loader) {
+    String superName =
+        classModel.superclass().map(sc -> sc.asInternalName().replace('/', '.')).orElse(null);
+    if (superName == null || superName.equals("java.lang.Object")) return null;
 
-    TypeKind returnType = TypeKind.from(desc.returnType());
+    try {
+      Class<?> parent = Class.forName(superName, false, loader);
+      while (parent != null && parent != Object.class) {
+        String internalName = parent.getName().replace('.', '/');
 
-    if (returnType == TypeKind.REFERENCE) {
-      return super.defaultTarget;
+        if (isClassChecked(internalName)) {
+          for (Method m : parent.getDeclaredMethods()) {
+            if (m.getName().equals(method.methodName().stringValue())) {
+              String methodDesc = method.methodTypeSymbol().descriptorString();
+              String parentDesc = getMethodDescriptor(m);
+              if (methodDesc.equals(parentDesc)) {
+                // Found Checked Parent defining this method
+                TypeKind returnType =
+                    TypeKind.from(ClassDesc.ofDescriptor(m.getReturnType().descriptorString()));
+                if (returnType == TypeKind.REFERENCE) {
+                  return super.defaultTarget;
+                }
+              }
+            }
+          }
+        }
+        parent = parent.getSuperclass();
+      }
+    } catch (Throwable e) {
+      // Ignore
     }
     return null;
   }
@@ -103,8 +86,38 @@ public class GlobalEnforcementPolicy extends StandardEnforcementPolicy {
         }
       }
     } catch (Throwable e) {
-      System.out.println("error finding class");
+      // Ignore
     }
     return false;
+  }
+
+  private boolean isFieldOptOut(String owner, String fieldName) {
+    try {
+      Class<?> clazz =
+          Class.forName(
+              owner.replace('/', '.'), false, Thread.currentThread().getContextClassLoader());
+      java.lang.reflect.Field field = clazz.getDeclaredField(fieldName);
+
+      for (java.lang.annotation.Annotation anno : field.getAnnotations()) {
+        if (optOutDescriptors.contains(
+            "L" + anno.annotationType().getName().replace('.', '/') + ";")) return true;
+      }
+      for (java.lang.annotation.Annotation anno : field.getAnnotatedType().getAnnotations()) {
+        if (optOutDescriptors.contains(
+            "L" + anno.annotationType().getName().replace('.', '/') + ";")) return true;
+      }
+    } catch (Throwable t) {
+    }
+    return false;
+  }
+
+  private String getMethodDescriptor(Method m) {
+    StringBuilder sb = new StringBuilder("(");
+    for (Class<?> p : m.getParameterTypes()) {
+      sb.append(ClassDesc.ofDescriptor(p.descriptorString()).descriptorString());
+    }
+    sb.append(")");
+    sb.append(ClassDesc.ofDescriptor(m.getReturnType().descriptorString()).descriptorString());
+    return sb.toString();
   }
 }
