@@ -22,21 +22,10 @@ public class NonNullTarget implements TargetAnnotation {
 
   @Override
   public void check(CodeBuilder b, TypeKind type, String diagnosticName) {
-    // FIX: Use TypeKind.Reference (correct enum name in JDK 25)
     if (type == TypeKind.REFERENCE) {
-      // Stack: [..., Value]
-
-      // 1. Push Message
       b.ldc(diagnosticName + " must be NonNull");
-
-      // Stack: [..., Value, String]
-
-      // 2. Call Verifier
       b.invokestatic(VERIFIER, METHOD, DESC);
-
-      // Stack: [...] (Consumed)
     } else {
-      // If it's a primitive, pop it to clean stack (no check needed)
       if (type.slotSize() == 1) b.pop();
       else b.pop2();
     }

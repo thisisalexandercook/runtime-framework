@@ -19,7 +19,7 @@ import java.lang.classfile.instruction.FieldInstruction;
 import java.lang.classfile.instruction.InvokeInstruction;
 import java.lang.classfile.instruction.LineNumber;
 import java.lang.classfile.instruction.ReturnInstruction;
-import java.lang.classfile.instruction.StoreInstruction; // NEW
+import java.lang.classfile.instruction.StoreInstruction;
 import java.lang.constant.MethodTypeDesc;
 import java.lang.reflect.Modifier;
 
@@ -48,7 +48,6 @@ public abstract class RuntimeInstrumenter {
                         boolean entryChecksDone = !isCheckedScope;
 
                         for (CodeElement element : codeModel) {
-                          // Inject entry checks after first LineNumber to ensure valid stack traces
                           if (!entryChecksDone && element instanceof LineNumber) {
                             codeBuilder.with(element);
                             instrumentMethodEntry(codeBuilder, methodModel);
@@ -72,6 +71,8 @@ public abstract class RuntimeInstrumenter {
                                 // and GETSTATIC instructions are not actually dangerous
                                 // on their own. Its when we STORE a field we read from
                                 // that an issue could arise
+                                // TODO: consider method of turning on and off different
+                                // boundary sites
                               }
                             }
                           } else if (element instanceof ReturnInstruction rInst) {
@@ -95,9 +96,7 @@ public abstract class RuntimeInstrumenter {
                             if (isCheckedScope) {
                               generateArrayLoadCheck(codeBuilder, aload);
                             }
-                          } else if (element
-                              instanceof StoreInstruction store) { // NEW: Store Check
-                            // GATE: Only check local vars in Checked Code
+                          } else if (element instanceof StoreInstruction store) {
                             if (isCheckedScope) {
                               generateStoreCheck(codeBuilder, store, methodModel);
                             }
@@ -149,8 +148,6 @@ public abstract class RuntimeInstrumenter {
       slotIndex += type.slotSize();
     }
   }
-
-  // --- Abstract Hooks ---
 
   protected abstract void generateParameterCheck(
       CodeBuilder b, int slotIndex, TypeKind type, MethodModel method, int paramIndex);

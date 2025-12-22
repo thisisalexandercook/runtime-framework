@@ -7,7 +7,7 @@ import io.github.eisop.runtimeframework.filter.Filter;
 import io.github.eisop.runtimeframework.qual.AnnotatedFor;
 import java.lang.classfile.Annotation;
 import java.lang.classfile.AnnotationValue;
-import java.lang.classfile.Attributes; // Added import
+import java.lang.classfile.Attributes;
 import java.lang.classfile.ClassFile;
 import java.lang.classfile.ClassModel;
 import java.lang.instrument.ClassFileTransformer;
@@ -21,20 +21,22 @@ public class RuntimeTransformer implements ClassFileTransformer {
   private final Filter<ClassInfo> policyFilter;
   private final RuntimeChecker checker;
   private final boolean trustAnnotatedFor;
+  private final boolean isGlobalMode;
 
   private final Map<String, Boolean> packageCache = new ConcurrentHashMap<>();
-
   private static final String ANNOTATED_FOR_DESC = AnnotatedFor.class.descriptorString();
 
   public RuntimeTransformer(
       Filter<ClassInfo> scanFilter,
       Filter<ClassInfo> policyFilter,
       RuntimeChecker checker,
-      boolean trustAnnotatedFor) {
+      boolean trustAnnotatedFor,
+      boolean isGlobalMode) {
     this.scanFilter = scanFilter;
     this.policyFilter = policyFilter;
     this.checker = checker;
     this.trustAnnotatedFor = trustAnnotatedFor;
+    this.isGlobalMode = isGlobalMode;
   }
 
   @Override
@@ -78,6 +80,10 @@ public class RuntimeTransformer implements ClassFileTransformer {
           System.out.println("[RuntimeFramework] Auto-detected Checked Package: " + className);
           isChecked = true;
         }
+      }
+
+      if (!isChecked && !isGlobalMode) {
+        return null;
       }
 
       boolean finalIsChecked = isChecked;
@@ -124,7 +130,7 @@ public class RuntimeTransformer implements ClassFileTransformer {
         }
       }
     } catch (Exception e) {
-      System.out.println("TODO");
+      System.out.println("Cannot get package info");
     }
 
     packageCache.put(packageName, found);

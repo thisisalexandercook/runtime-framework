@@ -38,6 +38,14 @@ public class NullnessDirectoryTest extends RuntimeTestRunner {
   }
 
   @Test
+  public void testFieldWriteWithoutGlobalScenarios() throws Exception {
+    runDirectoryTest(
+        "nullness-field-write-no-global",
+        "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker",
+        false);
+  }
+
+  @Test
   public void testBridgeGeneration() throws Exception {
     runDirectoryTest(
         "nullness-bridge",

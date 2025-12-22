@@ -23,16 +23,12 @@ public class NullnessRuntimeChecker extends RuntimeChecker {
   public RuntimeInstrumenter getInstrumenter(Filter<ClassInfo> filter) {
     EnforcementPolicy policy =
         createPolicy(
-            List.of(new NonNullTarget()),
-            List.of(new OptOutAnnotation(Nullable.class)), // Wraps the class
-            filter);
+            List.of(new NonNullTarget()), List.of(new OptOutAnnotation(Nullable.class)), filter);
 
-    // 2. Create Resolver
     HierarchyResolver resolver =
         new ReflectionHierarchyResolver(
             className -> filter.test(new ClassInfo(className.replace('.', '/'), null, null)));
 
-    // 3. Create Instrumenter
     return new AnnotationInstrumenter(policy, resolver, filter);
   }
 }

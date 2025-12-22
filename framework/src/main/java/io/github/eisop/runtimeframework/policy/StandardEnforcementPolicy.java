@@ -63,8 +63,6 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
     return false;
   }
 
-  // --- 1. Internal Logic ---
-
   @Override
   public TargetAnnotation getParameterCheck(MethodModel method, int paramIndex, TypeKind type) {
     if (type != TypeKind.REFERENCE) return null;
@@ -79,7 +77,7 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
 
   @Override
   public TargetAnnotation getFieldWriteCheck(FieldModel field, TypeKind type) {
-    return null; // Trust internal code
+    return null;
   }
 
   @Override
@@ -94,14 +92,13 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
 
   @Override
   public TargetAnnotation getReturnCheck(MethodModel method) {
-    return null; // Trust internal code
+    return null;
   }
 
   @Override
   public TargetAnnotation getLocalVariableWriteCheck(MethodModel method, int slot, TypeKind type) {
     if (type != TypeKind.REFERENCE) return null;
 
-    // Scan for annotations on this local variable slot
     List<Annotation> annos = getLocalVariableAnnotations(method, slot);
 
     TargetAnnotation explicit = findTarget(annos);
@@ -110,8 +107,6 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
 
     return defaultTarget;
   }
-
-  // --- Array Logic ---
 
   @Override
   public TargetAnnotation getArrayStoreCheck(TypeKind componentType) {
@@ -128,8 +123,6 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
     }
     return null;
   }
-
-  // --- 2. Boundary Logic ---
 
   @Override
   public TargetAnnotation getBoundaryCallCheck(String owner, MethodTypeDesc desc) {
