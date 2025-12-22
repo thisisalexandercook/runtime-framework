@@ -13,7 +13,7 @@ import java.util.Collection;
  */
 public abstract class RuntimeChecker {
 
-  /** Returns the human-readable name of this checker (e.g., "Nullness Runtime Checker"). */
+  /** Returns the name of this checker. This string should match the name used in AnnotatedFor */
   public abstract String getName();
 
   /**
