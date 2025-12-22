@@ -114,7 +114,6 @@ public class RuntimeTestRunner extends AgentTestHarness {
         .forEach(
             line -> {
               if (line.startsWith("[VIOLATION]")) {
-                // Format: [VIOLATION] File.java:Line (Checker) Message
                 String[] parts = line.split(" ");
                 if (parts.length > 1) {
                   String fileLoc = parts[1];
@@ -122,12 +121,8 @@ public class RuntimeTestRunner extends AgentTestHarness {
                     String[] locParts = fileLoc.split(":");
                     String errFile = locParts[0];
                     long lineNum = Long.parseLong(locParts[1]);
-
                     int msgStart = line.indexOf(") ") + 2;
                     String msg = (msgStart > 1) ? line.substring(msgStart) : "";
-
-                    // FIX: Added 'true ||' logic implicitly by removing the filename check.
-                    // Now we accept errors from ANY file involved in the test.
                     actualErrors.add(new ExpectedError(errFile, lineNum, msg.trim()));
                   }
                 }
@@ -141,12 +136,8 @@ public class RuntimeTestRunner extends AgentTestHarness {
         act -> {
           ExpectedError bestMatch = null;
           for (ExpectedError exp : unmatchedExpected) {
-            // 1. Must match Filename
             if (!exp.filename().equals(act.filename())) continue;
-
-            // 2. Must match Message
             if (exp.expectedMessage().equals(act.expectedMessage())) {
-              // 3. Fuzzy Line Check (+/- 5 lines)
               long diff = Math.abs(act.lineNumber() - exp.lineNumber());
               if (diff <= 5) {
                 bestMatch = exp;

@@ -46,8 +46,6 @@ public class ReflectionHierarchyResolver implements HierarchyResolver {
           if (Modifier.isFinal(mods) || Modifier.isStatic(mods) || Modifier.isPrivate(mods))
             continue;
           if (m.isSynthetic() || m.isBridge()) continue;
-
-          // FIX: Use manual descriptor generation instead of ASM
           String sig = m.getName() + getMethodDescriptor(m);
           if (implementedSignatures.contains(sig)) continue;
 
@@ -57,13 +55,13 @@ public class ReflectionHierarchyResolver implements HierarchyResolver {
         currentAncestor = currentAncestor.getSuperclass();
       }
     } catch (ClassNotFoundException e) {
-      // System.err.println("[RuntimeFramework] Could not resolve hierarchy for: " +
-      // model.thisClass().asInternalName());
+      System.err.println(
+          "[RuntimeFramework] Could not resolve hierarchy for: "
+              + model.thisClass().asInternalName());
     }
     return bridgesNeeded;
   }
 
-  // Helper to generate descriptor (e.g. "(Ljava/lang/String;)V") using JDK APIs
   private String getMethodDescriptor(Method m) {
     StringBuilder sb = new StringBuilder("(");
     for (Class<?> p : m.getParameterTypes()) {

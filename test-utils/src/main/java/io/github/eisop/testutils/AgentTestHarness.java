@@ -86,7 +86,6 @@ public abstract class AgentTestHarness {
 
   protected void compileWithClasspath(String extraClasspath, String... filenames) throws Exception {
     Path qualJar = findJar("checker-qual");
-    // FIX: Include framework.jar so that @AnnotatedFor and other runtime annotations resolve
     Path frameworkJar = findJar("framework");
 
     String cp =
