@@ -38,31 +38,22 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
     this.safetyFilter = safetyFilter;
   }
 
-  // --- Hooks ---
-
   @Override
   protected void generateArrayStoreCheck(CodeBuilder b, ArrayStoreInstruction instruction) {
-    // We only support Reference Arrays (AASTORE) for nullness checking
     if (instruction.opcode() == Opcode.AASTORE) {
       TargetAnnotation target = policy.getArrayStoreCheck(TypeKind.REFERENCE);
       if (target != null) {
-        // Stack: [..., arrayRef, index, value]
-        // We need to check 'value' without consuming it.
         b.dup();
-        // Stack: [..., arrayRef, index, value, value]
         target.check(b, TypeKind.REFERENCE, "Array Element Write");
-        // Stack: [..., arrayRef, index, value] -> Ready for AASTORE
       }
     }
   }
 
   @Override
   protected void generateArrayLoadCheck(CodeBuilder b, ArrayLoadInstruction instruction) {
-    // We only support Reference Arrays (AALOAD)
     if (instruction.opcode() == Opcode.AALOAD) {
       TargetAnnotation target = policy.getArrayLoadCheck(TypeKind.REFERENCE);
       if (target != null) {
-        // Stack: [..., value] (Instruction has already executed)
         b.dup();
         target.check(b, TypeKind.REFERENCE, "Array Element Read");
       }
@@ -85,15 +76,12 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
     TargetAnnotation target = null;
     TypeKind type = TypeKind.fromDescriptor(field.typeSymbol().descriptorString());
 
-    // A. Internal Write (this.field = val)
     if (field.owner().asInternalName().equals(classModel.thisClass().asInternalName())) {
       FieldModel targetField = findField(classModel, field);
       if (targetField != null) {
         target = policy.getFieldWriteCheck(targetField, type);
       }
-    }
-    // B. External Write (other.field = val) - Crucial for Global Policy
-    else {
+    } else {
       target =
           policy.getBoundaryFieldWriteCheck(
               field.owner().asInternalName(), field.name().stringValue(), type);
@@ -153,17 +141,23 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
       ClassModel classModel,
       ClassLoader loader) {
     if (ret.opcode() != Opcode.ARETURN) return;
+    System.out.println(
+        "[DEBUG] Checking Unchecked Return for "
+            + classModel.thisClass().asInternalName()
+            + "."
+            + method.methodName().stringValue());
 
-    // Delegated to Policy now
     TargetAnnotation target = policy.getUncheckedOverrideReturnCheck(classModel, method, loader);
-
     if (target != null) {
+      System.out.println("[DEBUG] Policy returned target for override check.");
+
       b.dup();
       target.check(
           b,
           TypeKind.REFERENCE,
           "Return value of overridden method " + method.methodName().stringValue());
     }
+    System.out.println("[DEBUG] Policy returned NULL for override check.");
   }
 
   @Override
@@ -200,8 +194,6 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
       target.check(b, TypeKind.REFERENCE, "Local Variable Assignment (Slot " + slot + ")");
     }
   }
-
-  // --- Helpers ---
 
   private void emitBridge(ClassBuilder builder, Method parentMethod) {
     String methodName = parentMethod.getName();
