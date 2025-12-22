@@ -4,5 +4,9 @@ public class LegacyTrojan extends SafeContract {
         return null;
 	// :: error: (Return value of overridden method getValue must be NonNull)
     }
+    @Override
+    public String getUnsafeValue() {
+	return null;
+    }
 
 }
