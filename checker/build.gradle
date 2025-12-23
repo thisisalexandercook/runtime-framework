@@ -1,0 +1,26 @@
+plugins {
+    id 'java'
+}
+
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25) // Target JDK 25
+    }
+}
+
+ext {
+    versions = [
+        eisopVersion: '3.49.3-eisop1'
+    ]
+}
+
+dependencies {
+    implementation project(':framework')
+    implementation "io.github.eisop:checker-qual:${versions.eisopVersion}"
+
+    testImplementation platform('org.junit:junit-bom:5.10.0')
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation project(':test-utils')
+}

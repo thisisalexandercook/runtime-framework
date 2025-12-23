@@ -1,0 +1,9 @@
+plugins {
+    id 'java-library'
+}
+
+dependencies {
+    api project(':framework')
+    api platform('org.junit:junit-bom:5.10.0')
+    api 'org.junit.jupiter:junit-jupiter'
+}

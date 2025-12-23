@@ -1,0 +1,18 @@
+#+TITLE: Project Notes
+#+AUTHOR: Alex Cook
+
+* Building and Running an agent
+
+Agent currently lives in the framework subproject, so build project then create jar with:
+
+#+BEGIN_SRC bash
+./gradlew :framework:jar
+#+END_SRC
+
+Run agent with the following command:
+
+#+BEGIN_SRC bash
+ java -javaagent:framework/build/libs/framework.jar \
+     -cp ~/scratch \
+     Hello
+#+END_SRC

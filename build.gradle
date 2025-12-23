@@ -1,15 +1,27 @@
 plugins {
+    id 'base'
     id 'net.ltgt.errorprone'  version '4.3.0' apply false
     id 'com.diffplug.spotless' version '8.1.0' apply false
     id 'java'
 }
 
-subprojects {
+allprojects {
     repositories {
-	mavenCentral()
+        mavenCentral()
     }
-    // TODO: better spotless integration to support groovy etc...
+
     apply plugin: 'com.diffplug.spotless'
+    spotless {
+        groovyGradle {
+            target '**/*.gradle'
+            targetExclude 'build/**', '.gradle/**', '.direnv/**'
+            greclipse()
+            leadingTabsToSpaces(4)
+            trimTrailingWhitespace()
+            endWithNewline()
+        }
+    }
+
     plugins.withId('java') {
         java {
             toolchain {
@@ -17,27 +29,73 @@ subprojects {
             }
         }
 
-	spotless {
-        java {
-            googleJavaFormat('1.32.0')
+        spotless {
+            java {
+                googleJavaFormat('1.32.0')
             }
-	}
+        }
+
+        apply plugin: 'net.ltgt.errorprone'
+        dependencies {
+            errorprone("com.google.errorprone:error_prone_core:2.44.0")
+        }
+
+        tasks.withType(Test).configureEach {
+            // Pass the absolute path of the 'dist' folder to the test JVM
+            useJUnitPlatform()
+            systemProperty 'agent.dist.dir', rootProject.layout.buildDirectory.dir("dist").get().asFile.absolutePath
+
+            // Ensure artifacts are built before running tests
+            dependsOn rootProject.tasks.named('copyToDist')
+
+            // Allow stdout to show up in Gradle logs
+            testLogging {
+                events "passed", "skipped", "failed", "standardOut", "standardError"
+            }
+        }
+    }
+
+    apply plugin: 'eclipse'
+    eclipse.classpath {
+        defaultOutputDir = file("build/default")
+        file.whenMerged { cp ->
+            cp.entries.forEach { cpe ->
+                if (cpe instanceof org.gradle.plugins.ide.eclipse.model.SourceFolder) {
+                    cpe.output = cpe.output.replace "bin/", "build/classes/java/"
+                }
+                if (cpe instanceof org.gradle.plugins.ide.eclipse.model.Output) {
+                    cpe.path = cpe.path.replace "bin/", "build/"
+                }
+            }
+        }
     }
 }
 
-allprojects {
-    apply plugin: 'eclipse'
-    eclipse.classpath {
-	defaultOutputDir = file("build/default")
-	file.whenMerged { cp ->
-            cp.entries.forEach { cpe ->
-		if (cpe instanceof org.gradle.plugins.ide.eclipse.model.SourceFolder) {
-                    cpe.output = cpe.output.replace "bin/", "build/classes/java/"
-		}
-		if (cpe instanceof org.gradle.plugins.ide.eclipse.model.Output) {
-                    cpe.path = cpe.path.replace "bin/", "build/"
-		}
-            }
-	}
+task copyToDist(type: Copy) {
+    // FIX: Force this task to run every time (disable incremental build check)
+    outputs.upToDateWhen { false }
+
+    // Use the Layout API to get a provider for the destination directory.
+    // This is safe to capture for the Configuration Cache.
+    def distDir = layout.buildDirectory.dir("dist")
+    into distDir
+
+    // FIX: Flatten the lists so the Copy task sees the actual files, not a List of Lists
+    from {
+        subprojects.collect { it.tasks.withType(Jar) }.flatten()
+    }
+    from {
+        subprojects.findAll { it.plugins.hasPlugin('java') || it.plugins.hasPlugin('java-library') }
+        .collect { it.configurations.getByName('runtimeClasspath') }
+        .flatten()
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    // Log so we know it ran
+    doFirst {
+        // Use the captured provider (.get().asFile) instead of '$buildDir'
+        println ">> Copying artifacts to ${distDir.get().asFile}"
     }
 }
+
+build.dependsOn copyToDist
