@@ -153,7 +153,13 @@ public abstract class AgentTestHarness {
     try (Stream<Path> files = Files.list(distDir)) {
       return files
           .filter(
-              p -> p.getFileName().toString().startsWith(prefix) && p.toString().endsWith(".jar"))
+              p -> {
+                String name = p.getFileName().toString();
+                if (prefix.equals("checker") && name.startsWith("checker-qual")) {
+                  return false;
+                }
+                return name.startsWith(prefix) && name.endsWith(".jar");
+              })
           .findFirst()
           .orElseThrow(
               () ->
