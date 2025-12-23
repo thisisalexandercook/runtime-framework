@@ -15,5 +15,8 @@ public class InstanceBoundary {
         String s = lib.getNull();
 	// :: error: (Local Variable Assignment (Slot 2) must be NonNull)
 
+	lib.getNull();
+	// currently no explicit check on the return if its not stored 
+
     }
 }

@@ -14,9 +14,9 @@ public class NullnessDirectoryTest extends RuntimeTestRunner {
   }
 
   @Test
-  public void testBoundaryScenarios() throws Exception {
+  public void testInvokeScenarios() throws Exception {
     runDirectoryTest(
-        "nullness-boundary",
+        "nullness-invoke",
         "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker",
         false);
   }
