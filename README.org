@@ -24,11 +24,11 @@ This project requires JDK25+.
 
 ** Status
 
-This project is in **early development** and will still go through many ~breaking~ changes regarding API and configuration. Its overall design goal is to be flexible enough to support any pluggable type system but is currently focused on Nullness. 
+This project is in early development and will still go through many breaking changes regarding API and configuration. Its overall design goal is to be flexible enough to support any pluggable type system but is currently focused on Nullness.
 
 * Building the Project
 
-The project uses Gradle 9.0. To build the agent and runtime libraries:
+This project uses Gradle 9.0. To build the agent and runtime libraries:
 
 #+begin_src bash
 ./gradlew build
@@ -38,7 +38,7 @@ Note: This will also run the test suite located under ~checker/src/test/java/~ (
 
 This will generate the artifacts in ~build/dist/~:
 - ~framework.jar~ (The Java Agent)
-- ~checker.jar~ (The Nullness Checker logic)
+- ~checker.jar~ (The Runtime Nullness Checker)
 - ~test-utils.jar~ (Testing helpers)
 - ~checker-qual.jar~ (Annotations)
 
