@@ -139,13 +139,8 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
       ClassModel classModel,
       ClassLoader loader) {
     if (ret.opcode() != Opcode.ARETURN) return;
-    System.out.println(
-        "[DEBUG] Checking Unchecked Return for "
-            + classModel.thisClass().asInternalName()
-            + "."
-            + method.methodName().stringValue());
-
     TargetAnnotation target = policy.getUncheckedOverrideReturnCheck(classModel, method, loader);
+
     if (target != null) {
       b.dup();
       target.check(

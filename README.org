@@ -1,0 +1,103 @@
+#+TITLE: Runtime Framework
+* About
+
+A Java Agent-based framework designed to enforce pluggable type systems at runtime. By instrumenting bytecode at load-time, the framework ensures that type contracts (such as @NonNull) are respected at the boundary between annotated and unannotated code. This provides a traceable safety net when integrating code verified by tools like the [[https://github.com/eisop/checker-framework][EISOP Checker Framework]] with legacy or unchecked external libraries.
+
+** Project Structure
+
+- ~framework/~: The core agent and instrumentation logic.
+  - ~agent~: The Java Agent entry point and transformer.
+  - ~core~: The main instrumentation engine
+  - ~policy~: Defines /when/ checks are injected.
+    - Currently, there are two defined policies: a *Standard Policy* and a *Global Policy*.
+    - The **Standard Policy** instruments only code that has been marked as "Checked".
+    - The **Global Policy** extends this to instrument Unchecked code as well.
+  - ~resolution~: Handles class hierarchy analysis for bridge methods.
+  - ~filter~: Controls which classes are instrumented.
+  - ~runtime~: The runtime library that instrumented code calls.
+- ~checker/~: Concrete implementations of type systems (currently Nullness).
+- ~test-utils/~: Shared testing infrastructure for writing integration tests.
+  
+** Requirements
+
+This project requires JDK25+.
+
+** Status
+
+This project is in **early development** and will still go through many ~breaking~ changes regarding API and configuration. Its overall design goal is to be flexible enough to support any pluggable type system but is currently focused on Nullness. 
+
+* Building the Project
+
+The project uses Gradle 9.0. To build the agent and runtime libraries:
+
+#+begin_src bash
+./gradlew build
+#+end_src
+
+Note: This will also run the test suite located under ~checker/src/test/java/~ (executing integration tests via ~NullnessDirectoryTest~).
+
+This will generate the artifacts in ~build/dist/~:
+- ~framework.jar~ (The Java Agent)
+- ~checker.jar~ (The Nullness Checker logic)
+- ~test-utils.jar~ (Testing helpers)
+- ~checker-qual.jar~ (Annotations)
+
+* Usage
+
+To use the agent, you need to launch your Java application with the ~-javaagent~ flag and configure the classpath.
+
+** 1. Standard Policy Example
+
+There are two examples under ~examples/~ that demonstrate basic usage. These examples catch exceptions to print success messages instead of crashing, allowing you to see multiple violations in one run while still using the exception handler.
+
+The **Standard Policy** example demonstrates instrumentation on only checked code, where checked code is defined as code within the scope of an ~AnnotatedFor~ annotation. This policy is limited insofar as it will not instrument code outside of an ~AnnotatedFor~ scope, leaving field wrties from unchecked to checked code  and the checked parent, unchecked child relationship unaccounted for. However, limiting checks to only a checked scope could be prefered in some situations. 
+
+To compile the standard policy example:
+
+#+BEGIN_SRC bash
+  javac -cp 'build/dist/*' -d examples/standard-policy/ examples/standard-policy/*.java
+#+END_SRC
+
+To run the example:
+
+#+BEGIN_SRC bash
+  java \
+      -javaagent:build/dist/framework.jar \
+      -Druntime.checker=io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker \
+      -Druntime.trustAnnotatedFor=true \
+      -cp 'examples/standard-policy:build/dist/*' \
+      standard.StandardDemo
+#+END_SRC
+
+
+** 2. Global Policy Example
+
+The global policy instruments both checked and unchecked code. It applies all the same checks present in the standard policy, but now field writes from unchecked -> checked and Checked Parent Unchecked child relationships can be handled accordingly.
+
+To compile the global policy example:
+
+#+BEGIN_SRC bash
+  javac -cp 'build/dist/*' -d examples/global-policy/ examples/global-policy/*.java
+#+END_SRC
+
+To run the example:
+
+#+begin_src bash
+  java \
+      -javaagent:build/dist/framework.jar \
+      -Druntime.global=true \
+      -Druntime.checker=io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker \
+      -Druntime.trustAnnotatedFor=true \
+      -cp 'examples/global-policy:build/dist/*' \
+      global.GlobalDemo
+#+end_src
+
+** Configuration Properties
+
+| Property                    | Description                                                             | Example                                          |
+|-----------------------------+-------------------------------------------------------------------------+--------------------------------------------------|
+| ~runtime.checker~           | Fully qualified class name of the ~RuntimeChecker~ implementation.      | ~...checker.nullness.NullnessRuntimeChecker~     |
+| ~runtime.classes~           | Comma-separated list of classes to treat as "Checked" (Safe).           | ~com.app.Main,com.app.Utils~                     |
+| ~runtime.global~            | ~true~ to enable Global Policy (scans all classes for external writes). | ~true~                                           |
+| ~runtime.trustAnnotatedFor~ | ~true~ to automatically treat classes with ~@AnnotatedFor~ as Checked.  | ~true~                                           |
+| ~runtime.handler~           | ~ViolationHandler~ class to use (defaults to Throwing).                 | ~io.github.eisop.testutils.TestViolationHandler~ |

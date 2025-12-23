@@ -4,6 +4,10 @@
 # Ignore Gradle build output directory
 build
 
+# Example Classfiles
+examples/global-policy/global/
+examples/standard-policy/standard/
+
 # Eclipse
 .metadata
 .classpath
