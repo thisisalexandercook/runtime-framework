@@ -5,7 +5,6 @@ import io.github.eisop.runtimeframework.filter.Filter;
 import io.github.eisop.runtimeframework.policy.EnforcementPolicy;
 import io.github.eisop.runtimeframework.policy.GlobalEnforcementPolicy;
 import io.github.eisop.runtimeframework.policy.StandardEnforcementPolicy;
-import java.util.Collection;
 
 /**
  * Represents a specific type system or check to be enforced (e.g., Nullness, Immutability). This
@@ -30,20 +29,18 @@ public abstract class RuntimeChecker {
    *
    * <p>Subclasses should use this instead of manually checking system properties.
    *
-   * @param targets The collection of target annotations relevant to this checker.
+   * @param config The TypeSystemConfiguration for this checker.
    * @param filter The filter defining the boundary between Checked and Unchecked code.
    * @return A configured EnforcementPolicy (Standard or Global).
    */
   protected EnforcementPolicy createPolicy(
-      Collection<TargetAnnotation> targets,
-      Collection<OptOutAnnotation> optOuts,
-      Filter<ClassInfo> filter) {
+      TypeSystemConfiguration config, Filter<ClassInfo> filter) {
 
     boolean isGlobalMode = Boolean.getBoolean("runtime.global");
     if (isGlobalMode) {
-      return new GlobalEnforcementPolicy(targets, optOuts, filter);
+      return new GlobalEnforcementPolicy(config, filter);
     } else {
-      return new StandardEnforcementPolicy(targets, optOuts, filter);
+      return new StandardEnforcementPolicy(config, filter);
     }
   }
 }

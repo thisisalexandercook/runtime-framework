@@ -1,7 +1,8 @@
 package io.github.eisop.runtimeframework.policy;
 
-import io.github.eisop.runtimeframework.core.OptOutAnnotation;
-import io.github.eisop.runtimeframework.core.TargetAnnotation;
+import io.github.eisop.runtimeframework.core.RuntimeVerifier;
+import io.github.eisop.runtimeframework.core.TypeSystemConfiguration;
+import io.github.eisop.runtimeframework.core.ValidationKind;
 import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.filter.Filter;
 import java.lang.classfile.ClassModel;
@@ -9,33 +10,32 @@ import java.lang.classfile.MethodModel;
 import java.lang.classfile.TypeKind;
 import java.lang.constant.ClassDesc;
 import java.lang.reflect.Method;
-import java.util.Collection;
 
 public class GlobalEnforcementPolicy extends StandardEnforcementPolicy {
 
   public GlobalEnforcementPolicy(
-      Collection<TargetAnnotation> targetAnnotations,
-      Collection<OptOutAnnotation> optOutAnnotations,
-      Filter<ClassInfo> safetyFilter) {
-    super(targetAnnotations, optOutAnnotations, safetyFilter);
+      TypeSystemConfiguration configuration, Filter<ClassInfo> safetyFilter) {
+    super(configuration, safetyFilter);
   }
 
   @Override
-  public TargetAnnotation getBoundaryFieldWriteCheck(
-      String owner, String fieldName, TypeKind type) {
+  public RuntimeVerifier getBoundaryFieldWriteCheck(String owner, String fieldName, TypeKind type) {
     if (isClassChecked(owner)) {
       if (type == TypeKind.REFERENCE) {
         if (isFieldOptOut(owner, fieldName)) {
           return null;
         }
-        return super.defaultTarget;
+        TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
+        if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
+          return defaultEntry.verifier();
+        }
       }
     }
     return null;
   }
 
   @Override
-  public TargetAnnotation getUncheckedOverrideReturnCheck(
+  public RuntimeVerifier getUncheckedOverrideReturnCheck(
       ClassModel classModel, MethodModel method, ClassLoader loader) {
     String superName =
         classModel.superclass().map(sc -> sc.asInternalName().replace('/', '.')).orElse(null);
@@ -52,25 +52,27 @@ public class GlobalEnforcementPolicy extends StandardEnforcementPolicy {
               String methodDesc = method.methodTypeSymbol().descriptorString();
               String parentDesc = getMethodDescriptor(m);
               if (methodDesc.equals(parentDesc)) {
+                // Check parent method annotations
                 for (java.lang.annotation.Annotation anno : m.getAnnotations()) {
                   String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
-                  if (optOutDescriptors.contains(desc)) {
-                    return null;
-                  }
+                  TypeSystemConfiguration.ConfigEntry entry = configuration.find(desc);
+                  if (entry != null && entry.kind() == ValidationKind.NOOP) return null;
                 }
-
+                // Check return type annotations
                 for (java.lang.annotation.Annotation anno :
                     m.getAnnotatedReturnType().getAnnotations()) {
                   String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
-                  if (optOutDescriptors.contains(desc)) {
-                    return null;
-                  }
+                  TypeSystemConfiguration.ConfigEntry entry = configuration.find(desc);
+                  if (entry != null && entry.kind() == ValidationKind.NOOP) return null;
                 }
 
                 TypeKind returnType =
                     TypeKind.from(ClassDesc.ofDescriptor(m.getReturnType().descriptorString()));
                 if (returnType == TypeKind.REFERENCE) {
-                  return super.defaultTarget;
+                  TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
+                  if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
+                    return defaultEntry.verifier();
+                  }
                 }
               }
             }
@@ -113,12 +115,14 @@ public class GlobalEnforcementPolicy extends StandardEnforcementPolicy {
       java.lang.reflect.Field field = clazz.getDeclaredField(fieldName);
 
       for (java.lang.annotation.Annotation anno : field.getAnnotations()) {
-        if (optOutDescriptors.contains(
-            "L" + anno.annotationType().getName().replace('.', '/') + ";")) return true;
+        String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
+        TypeSystemConfiguration.ConfigEntry entry = configuration.find(desc);
+        if (entry != null && entry.kind() == ValidationKind.NOOP) return true;
       }
       for (java.lang.annotation.Annotation anno : field.getAnnotatedType().getAnnotations()) {
-        if (optOutDescriptors.contains(
-            "L" + anno.annotationType().getName().replace('.', '/') + ";")) return true;
+        String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
+        TypeSystemConfiguration.ConfigEntry entry = configuration.find(desc);
+        if (entry != null && entry.kind() == ValidationKind.NOOP) return true;
       }
     } catch (Throwable t) {
       System.out.println("reflection fail in is field opt out");
