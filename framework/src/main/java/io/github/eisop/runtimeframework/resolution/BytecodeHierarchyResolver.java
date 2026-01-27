@@ -23,7 +23,6 @@ public class BytecodeHierarchyResolver implements HierarchyResolver {
     Set<ParentMethod> bridgesNeeded = new HashSet<>();
     Set<String> implementedSignatures = new HashSet<>();
 
-    // Record signatures implemented in the current class
     for (MethodModel mm : model.methods()) {
       implementedSignatures.add(
           mm.methodName().stringValue() + mm.methodTypeSymbol().descriptorString());
@@ -37,17 +36,14 @@ public class BytecodeHierarchyResolver implements HierarchyResolver {
 
     if ("java.lang.Object".equals(superName)) return bridgesNeeded;
 
-    // Traverse up
     String currentName = superName;
     while (currentName != null && !currentName.equals("java.lang.Object")) {
-      // If the parent is "Checked" (safe), we stop bridging at this boundary.
       if (safetyFilter.test(currentName)) {
         break;
       }
 
       try (InputStream is = loader.getResourceAsStream(currentName.replace('.', '/') + ".class")) {
         if (is == null) {
-          // If we can't find the class resource, we can't analyze it.
           break;
         }
 
@@ -56,7 +52,6 @@ public class BytecodeHierarchyResolver implements HierarchyResolver {
         for (MethodModel m : parentModel.methods()) {
           int flags = m.flags().flagsMask();
 
-          // Check flags: Not Private, Not Static, Not Final, Not Synthetic, Not Bridge
           if (Modifier.isPrivate(flags)
               || Modifier.isStatic(flags)
               || Modifier.isFinal(flags)
