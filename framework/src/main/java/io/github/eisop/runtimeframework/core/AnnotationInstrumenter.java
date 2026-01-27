@@ -39,10 +39,10 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
   @Override
   protected void generateArrayStoreCheck(CodeBuilder b, ArrayStoreInstruction instruction) {
     if (instruction.opcode() == Opcode.AASTORE) {
-      TargetAnnotation target = policy.getArrayStoreCheck(TypeKind.REFERENCE);
+      RuntimeVerifier target = policy.getArrayStoreCheck(TypeKind.REFERENCE);
       if (target != null) {
         b.dup();
-        target.check(b, TypeKind.REFERENCE, "Array Element Write");
+        target.generateCheck(b, TypeKind.REFERENCE, "Array Element Write");
       }
     }
   }
@@ -50,10 +50,10 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
   @Override
   protected void generateArrayLoadCheck(CodeBuilder b, ArrayLoadInstruction instruction) {
     if (instruction.opcode() == Opcode.AALOAD) {
-      TargetAnnotation target = policy.getArrayLoadCheck(TypeKind.REFERENCE);
+      RuntimeVerifier target = policy.getArrayLoadCheck(TypeKind.REFERENCE);
       if (target != null) {
         b.dup();
-        target.check(b, TypeKind.REFERENCE, "Array Element Read");
+        target.generateCheck(b, TypeKind.REFERENCE, "Array Element Read");
       }
     }
   }
@@ -61,17 +61,17 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
   @Override
   protected void generateParameterCheck(
       CodeBuilder b, int slotIndex, TypeKind type, MethodModel method, int paramIndex) {
-    TargetAnnotation target = policy.getParameterCheck(method, paramIndex, type);
+    RuntimeVerifier target = policy.getParameterCheck(method, paramIndex, type);
     if (target != null) {
       b.aload(slotIndex);
-      target.check(b, type, "Parameter " + paramIndex);
+      target.generateCheck(b, type, "Parameter " + paramIndex);
     }
   }
 
   @Override
   protected void generateFieldWriteCheck(
       CodeBuilder b, FieldInstruction field, ClassModel classModel) {
-    TargetAnnotation target = null;
+    RuntimeVerifier target = null;
     TypeKind type = TypeKind.fromDescriptor(field.typeSymbol().descriptorString());
 
     if (field.owner().asInternalName().equals(classModel.thisClass().asInternalName())) {
@@ -88,10 +88,10 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
     if (target != null) {
       if (field.opcode() == Opcode.PUTSTATIC) {
         b.dup();
-        target.check(b, type, "Static Field '" + field.name().stringValue() + "'");
+        target.generateCheck(b, type, "Static Field '" + field.name().stringValue() + "'");
       } else if (field.opcode() == Opcode.PUTFIELD) {
         b.dup_x1();
-        target.check(b, type, "Field '" + field.name().stringValue() + "'");
+        target.generateCheck(b, type, "Field '" + field.name().stringValue() + "'");
         b.swap();
       }
     }
@@ -100,7 +100,7 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
   @Override
   protected void generateFieldReadCheck(
       CodeBuilder b, FieldInstruction field, ClassModel classModel) {
-    TargetAnnotation target = null;
+    RuntimeVerifier target = null;
     TypeKind type = TypeKind.fromDescriptor(field.typeSymbol().descriptorString());
 
     if (field.owner().asInternalName().equals(classModel.thisClass().asInternalName())) {
@@ -117,17 +117,18 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
     if (target != null) {
       if (type.slotSize() == 1) {
         b.dup();
-        target.check(b, type, "Read Field '" + field.name().stringValue() + "'");
+        target.generateCheck(b, type, "Read Field '" + field.name().stringValue() + "'");
       }
     }
   }
 
   @Override
   protected void generateReturnCheck(CodeBuilder b, ReturnInstruction ret, MethodModel method) {
-    TargetAnnotation target = policy.getReturnCheck(method);
+    RuntimeVerifier target = policy.getReturnCheck(method);
     if (target != null) {
       b.dup();
-      target.check(b, TypeKind.REFERENCE, "Return value of " + method.methodName().stringValue());
+      target.generateCheck(
+          b, TypeKind.REFERENCE, "Return value of " + method.methodName().stringValue());
     }
   }
 
@@ -139,11 +140,11 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
       ClassModel classModel,
       ClassLoader loader) {
     if (ret.opcode() != Opcode.ARETURN) return;
-    TargetAnnotation target = policy.getUncheckedOverrideReturnCheck(classModel, method, loader);
+    RuntimeVerifier target = policy.getUncheckedOverrideReturnCheck(classModel, method, loader);
 
     if (target != null) {
       b.dup();
-      target.check(
+      target.generateCheck(
           b,
           TypeKind.REFERENCE,
           "Return value of overridden method " + method.methodName().stringValue());
@@ -177,11 +178,11 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
     if (!isRefStore) return;
 
     int slot = instruction.slot();
-    TargetAnnotation target = policy.getLocalVariableWriteCheck(method, slot, TypeKind.REFERENCE);
+    RuntimeVerifier target = policy.getLocalVariableWriteCheck(method, slot, TypeKind.REFERENCE);
 
     if (target != null) {
       b.dup();
-      target.check(b, TypeKind.REFERENCE, "Local Variable Assignment (Slot " + slot + ")");
+      target.generateCheck(b, TypeKind.REFERENCE, "Local Variable Assignment (Slot " + slot + ")");
     }
   }
 
@@ -207,10 +208,10 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
                 for (int i = 0; i < paramTypes.length; i++) {
                   TypeKind type =
                       TypeKind.from(ClassDesc.ofDescriptor(paramTypes[i].descriptorString()));
-                  TargetAnnotation target = policy.getBridgeParameterCheck(parentMethod, i);
+                  RuntimeVerifier target = policy.getBridgeParameterCheck(parentMethod, i);
                   if (target != null) {
                     codeBuilder.aload(slotIndex);
-                    target.check(
+                    target.generateCheck(
                         codeBuilder, type, "Parameter " + i + " in inherited method " + methodName);
                   }
                   slotIndex += type.slotSize();

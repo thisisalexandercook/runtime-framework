@@ -1,7 +1,8 @@
 package io.github.eisop.runtimeframework.policy;
 
-import io.github.eisop.runtimeframework.core.OptOutAnnotation;
-import io.github.eisop.runtimeframework.core.TargetAnnotation;
+import io.github.eisop.runtimeframework.core.RuntimeVerifier;
+import io.github.eisop.runtimeframework.core.TypeSystemConfiguration;
+import io.github.eisop.runtimeframework.core.ValidationKind;
 import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.filter.Filter;
 import java.lang.classfile.Annotation;
@@ -14,132 +15,121 @@ import java.lang.constant.ClassDesc;
 import java.lang.constant.MethodTypeDesc;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 public class StandardEnforcementPolicy implements EnforcementPolicy {
 
-  protected final Map<String, TargetAnnotation> targets;
-  protected final Set<String> optOutDescriptors;
-  protected final TargetAnnotation defaultTarget;
+  protected final TypeSystemConfiguration configuration;
   protected final Filter<ClassInfo> safetyFilter;
 
   public StandardEnforcementPolicy(
-      Collection<TargetAnnotation> targetAnnotations,
-      Collection<OptOutAnnotation> optOutAnnotations,
-      Filter<ClassInfo> safetyFilter) {
-
-    this.targets =
-        targetAnnotations.stream()
-            .collect(Collectors.toMap(t -> t.annotationType().descriptorString(), t -> t));
-
-    this.optOutDescriptors =
-        optOutAnnotations.stream()
-            .map(o -> o.annotationType().descriptorString())
-            .collect(Collectors.toSet());
-
-    this.defaultTarget = targetAnnotations.stream().findFirst().orElse(null);
+      TypeSystemConfiguration configuration, Filter<ClassInfo> safetyFilter) {
+    this.configuration = configuration;
     this.safetyFilter = safetyFilter;
   }
 
-  private TargetAnnotation findTarget(List<Annotation> annotations) {
+  /**
+   * Resolves the verifier for a given list of annotations. Logic: 1. Check for any annotation that
+   * explicitly ENFORCES. 2. Check for any annotation that explicitly NOOPs. 3. Fallback to default.
+   */
+  protected RuntimeVerifier resolveVerifier(List<Annotation> annotations) {
+    // 1. Look for explicit configuration
     for (Annotation a : annotations) {
       String desc = a.classSymbol().descriptorString();
-      TargetAnnotation t = targets.get(desc);
-      if (t != null) return t;
-    }
-    return null;
-  }
-
-  private boolean hasOptOutAnnotation(List<Annotation> annotations) {
-    for (Annotation a : annotations) {
-      if (optOutDescriptors.contains(a.classSymbol().descriptorString())) {
-        return true;
+      TypeSystemConfiguration.ConfigEntry entry = configuration.find(desc);
+      if (entry != null) {
+        if (entry.kind() == ValidationKind.ENFORCE) {
+          return entry.verifier();
+        } else if (entry.kind() == ValidationKind.NOOP) {
+          return null; // Explicitly skipped
+        }
       }
     }
-    return false;
+
+    // 2. Fallback to default
+    TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
+    if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
+      return defaultEntry.verifier();
+    }
+
+    return null;
   }
 
   @Override
-  public TargetAnnotation getParameterCheck(MethodModel method, int paramIndex, TypeKind type) {
+  public RuntimeVerifier getParameterCheck(MethodModel method, int paramIndex, TypeKind type) {
     if (type != TypeKind.REFERENCE) return null;
     List<Annotation> annos = getMethodParamAnnotations(method, paramIndex);
-
-    TargetAnnotation explicit = findTarget(annos);
-    if (explicit != null) return explicit;
-    if (hasOptOutAnnotation(annos)) return null;
-
-    return defaultTarget;
+    return resolveVerifier(annos);
   }
 
   @Override
-  public TargetAnnotation getFieldWriteCheck(FieldModel field, TypeKind type) {
+  public RuntimeVerifier getFieldWriteCheck(FieldModel field, TypeKind type) {
     return null;
   }
 
   @Override
-  public TargetAnnotation getFieldReadCheck(FieldModel field, TypeKind type) {
+  public RuntimeVerifier getFieldReadCheck(FieldModel field, TypeKind type) {
     if (type != TypeKind.REFERENCE) return null;
     List<Annotation> annos = getFieldAnnotations(field);
-    TargetAnnotation explicit = findTarget(annos);
-    if (explicit != null) return explicit;
-    if (hasOptOutAnnotation(annos)) return null;
-    return defaultTarget;
+    return resolveVerifier(annos);
   }
 
   @Override
-  public TargetAnnotation getReturnCheck(MethodModel method) {
+  public RuntimeVerifier getReturnCheck(MethodModel method) {
     return null;
   }
 
   @Override
-  public TargetAnnotation getLocalVariableWriteCheck(MethodModel method, int slot, TypeKind type) {
+  public RuntimeVerifier getLocalVariableWriteCheck(MethodModel method, int slot, TypeKind type) {
     if (type != TypeKind.REFERENCE) return null;
-
     List<Annotation> annos = getLocalVariableAnnotations(method, slot);
-
-    TargetAnnotation explicit = findTarget(annos);
-    if (explicit != null) return explicit;
-    if (hasOptOutAnnotation(annos)) return null;
-
-    return defaultTarget;
+    return resolveVerifier(annos);
   }
 
   @Override
-  public TargetAnnotation getArrayStoreCheck(TypeKind componentType) {
+  public RuntimeVerifier getArrayStoreCheck(TypeKind componentType) {
     if (componentType == TypeKind.REFERENCE) {
-      return defaultTarget;
+      TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
+      if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
+        return defaultEntry.verifier();
+      }
     }
     return null;
   }
 
   @Override
-  public TargetAnnotation getArrayLoadCheck(TypeKind componentType) {
+  public RuntimeVerifier getArrayLoadCheck(TypeKind componentType) {
     if (componentType == TypeKind.REFERENCE) {
-      return defaultTarget;
+      TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
+      if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
+        return defaultEntry.verifier();
+      }
     }
     return null;
   }
 
   @Override
-  public TargetAnnotation getBoundaryCallCheck(String owner, MethodTypeDesc desc) {
+  public RuntimeVerifier getBoundaryCallCheck(String owner, MethodTypeDesc desc) {
     boolean isUnchecked = !safetyFilter.test(new ClassInfo(owner, null, null));
     TypeKind returnType = TypeKind.from(desc.returnType());
 
     if (isUnchecked && returnType == TypeKind.REFERENCE) {
-      return defaultTarget;
+      TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
+      if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
+        return defaultEntry.verifier();
+      }
     }
     return null;
   }
 
   @Override
-  public TargetAnnotation getBoundaryFieldReadCheck(String owner, String fieldName, TypeKind type) {
+  public RuntimeVerifier getBoundaryFieldReadCheck(String owner, String fieldName, TypeKind type) {
     boolean isUnchecked = !safetyFilter.test(new ClassInfo(owner, null, null));
     if (isUnchecked && type == TypeKind.REFERENCE) {
-      return defaultTarget;
+      TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
+      if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
+        return defaultEntry.verifier();
+      }
     }
     return null;
   }
@@ -153,46 +143,55 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
     java.lang.annotation.Annotation[][] paramAnnos = parentMethod.getParameterAnnotations();
 
     for (int i = 0; i < paramTypes.length; i++) {
+      // Check specific parameter annotations
+      boolean explicitNoop = false;
+      boolean explicitEnforce = false;
+
       for (java.lang.annotation.Annotation anno : paramAnnos[i]) {
         String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
-        if (targets.containsKey(desc)) return true;
+        TypeSystemConfiguration.ConfigEntry entry = configuration.find(desc);
+        if (entry != null) {
+          if (entry.kind() == ValidationKind.ENFORCE) explicitEnforce = true;
+          if (entry.kind() == ValidationKind.NOOP) explicitNoop = true;
+        }
       }
 
+      if (explicitEnforce) return true;
+
+      // If no explicit decision, check default if it's a reference type
       ClassDesc pTypeDesc = ClassDesc.ofDescriptor(paramTypes[i].descriptorString());
-      if (TypeKind.from(pTypeDesc) == TypeKind.REFERENCE && defaultTarget != null) {
-        boolean isOptedOut = false;
-        for (java.lang.annotation.Annotation anno : paramAnnos[i]) {
-          String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
-          if (optOutDescriptors.contains(desc)) {
-            isOptedOut = true;
-            break;
-          }
+      if (TypeKind.from(pTypeDesc) == TypeKind.REFERENCE && !explicitNoop) {
+        TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
+        if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
+          return true;
         }
-        if (!isOptedOut) return true;
       }
     }
     return false;
   }
 
   @Override
-  public TargetAnnotation getBridgeParameterCheck(Method parentMethod, int paramIndex) {
+  public RuntimeVerifier getBridgeParameterCheck(Method parentMethod, int paramIndex) {
     java.lang.annotation.Annotation[] annos = parentMethod.getParameterAnnotations()[paramIndex];
     Class<?> paramType = parentMethod.getParameterTypes()[paramIndex];
 
+    // 1. Explicit Configuration
     for (java.lang.annotation.Annotation anno : annos) {
       String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
-      TargetAnnotation t = targets.get(desc);
-      if (t != null) return t;
+      TypeSystemConfiguration.ConfigEntry entry = configuration.find(desc);
+      if (entry != null) {
+        if (entry.kind() == ValidationKind.ENFORCE) return entry.verifier();
+        if (entry.kind() == ValidationKind.NOOP) return null;
+      }
     }
 
-    for (java.lang.annotation.Annotation anno : annos) {
-      String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
-      if (optOutDescriptors.contains(desc)) return null;
-    }
-
+    // 2. Default
     ClassDesc pTypeDesc = ClassDesc.ofDescriptor(paramType.descriptorString());
     if (TypeKind.from(pTypeDesc) == TypeKind.REFERENCE) {
-      return defaultTarget;
+      TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
+      if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
+        return defaultEntry.verifier();
+      }
     }
     return null;
   }

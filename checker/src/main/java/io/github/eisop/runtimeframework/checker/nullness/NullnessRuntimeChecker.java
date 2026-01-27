@@ -1,15 +1,16 @@
 package io.github.eisop.runtimeframework.checker.nullness;
 
 import io.github.eisop.runtimeframework.core.AnnotationInstrumenter;
-import io.github.eisop.runtimeframework.core.OptOutAnnotation;
 import io.github.eisop.runtimeframework.core.RuntimeChecker;
 import io.github.eisop.runtimeframework.core.RuntimeInstrumenter;
+import io.github.eisop.runtimeframework.core.TypeSystemConfiguration;
+import io.github.eisop.runtimeframework.core.ValidationKind;
 import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.filter.Filter;
 import io.github.eisop.runtimeframework.policy.EnforcementPolicy;
 import io.github.eisop.runtimeframework.resolution.HierarchyResolver;
 import io.github.eisop.runtimeframework.resolution.ReflectionHierarchyResolver;
-import java.util.List;
+import org.checkerframework.checker.nullness.qual.NonNull;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 public class NullnessRuntimeChecker extends RuntimeChecker {
@@ -21,9 +22,15 @@ public class NullnessRuntimeChecker extends RuntimeChecker {
 
   @Override
   public RuntimeInstrumenter getInstrumenter(Filter<ClassInfo> filter) {
-    EnforcementPolicy policy =
-        createPolicy(
-            List.of(new NonNullTarget()), List.of(new OptOutAnnotation(Nullable.class)), filter);
+    NullnessVerifier verifier = new NullnessVerifier();
+
+    TypeSystemConfiguration config =
+        new TypeSystemConfiguration()
+            .onEnforce(NonNull.class, verifier)
+            .onNoop(Nullable.class)
+            .withDefault(ValidationKind.ENFORCE, verifier);
+
+    EnforcementPolicy policy = createPolicy(config, filter);
 
     HierarchyResolver resolver =
         new ReflectionHierarchyResolver(
