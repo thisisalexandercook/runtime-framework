@@ -215,7 +215,7 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
 
                 codeBuilder.aload(0);
                 slotIndex = 1;
-                for (java.lang.constant.ClassDesc pType : paramTypes) {
+                for (ClassDesc pType : paramTypes) {
                   TypeKind type = TypeKind.from(pType);
                   loadLocal(codeBuilder, type, slotIndex);
                   slotIndex += type.slotSize();
