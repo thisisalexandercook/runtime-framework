@@ -30,8 +30,8 @@ public class AnnotatedForFilter implements Filter<ClassInfo> {
   }
 
   /**
-   * Checks if the class represented by the given ClassModel is annotated for the a target type system.
-   * This also checks the package-level annotation if the class itself is not annotated.
+   * Checks if the class represented by the given ClassModel is annotated for the a target type
+   * system. This also checks the package-level annotation if the class itself is not annotated.
    *
    * @param model The ClassModel of the class to check.
    * @param loader The ClassLoader to use for loading package-info.
