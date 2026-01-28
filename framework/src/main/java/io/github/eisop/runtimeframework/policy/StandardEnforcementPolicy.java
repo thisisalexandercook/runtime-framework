@@ -5,15 +5,14 @@ import io.github.eisop.runtimeframework.core.TypeSystemConfiguration;
 import io.github.eisop.runtimeframework.core.ValidationKind;
 import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.filter.Filter;
+import io.github.eisop.runtimeframework.resolution.ParentMethod;
 import java.lang.classfile.Annotation;
 import java.lang.classfile.Attributes;
 import java.lang.classfile.FieldModel;
 import java.lang.classfile.MethodModel;
 import java.lang.classfile.TypeAnnotation;
 import java.lang.classfile.TypeKind;
-import java.lang.constant.ClassDesc;
 import java.lang.constant.MethodTypeDesc;
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -137,18 +136,21 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
   // --- 3. Inheritance Logic ---
 
   @Override
-  public boolean shouldGenerateBridge(Method parentMethod) {
-    if (parentMethod.getDeclaringClass() == Object.class) return false;
-    Class<?>[] paramTypes = parentMethod.getParameterTypes();
-    java.lang.annotation.Annotation[][] paramAnnos = parentMethod.getParameterAnnotations();
+  public boolean shouldGenerateBridge(ParentMethod parentMethod) {
+    if (parentMethod.owner().thisClass().asInternalName().equals("java/lang/Object")) return false;
 
-    for (int i = 0; i < paramTypes.length; i++) {
-      // Check specific parameter annotations
+    MethodModel method = parentMethod.method();
+    // MethodTypeDesc param parsing
+    var paramTypes = method.methodTypeSymbol().parameterList();
+
+    for (int i = 0; i < paramTypes.size(); i++) {
       boolean explicitNoop = false;
       boolean explicitEnforce = false;
 
-      for (java.lang.annotation.Annotation anno : paramAnnos[i]) {
-        String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
+      List<Annotation> annos = getMethodParamAnnotations(method, i);
+
+      for (Annotation anno : annos) {
+        String desc = anno.classSymbol().descriptorString();
         TypeSystemConfiguration.ConfigEntry entry = configuration.find(desc);
         if (entry != null) {
           if (entry.kind() == ValidationKind.ENFORCE) explicitEnforce = true;
@@ -159,8 +161,8 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
       if (explicitEnforce) return true;
 
       // If no explicit decision, check default if it's a reference type
-      ClassDesc pTypeDesc = ClassDesc.ofDescriptor(paramTypes[i].descriptorString());
-      if (TypeKind.from(pTypeDesc) == TypeKind.REFERENCE && !explicitNoop) {
+      TypeKind pType = TypeKind.from(paramTypes.get(i));
+      if (pType == TypeKind.REFERENCE && !explicitNoop) {
         TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
         if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
           return true;
@@ -171,26 +173,33 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
   }
 
   @Override
-  public RuntimeVerifier getBridgeParameterCheck(Method parentMethod, int paramIndex) {
-    java.lang.annotation.Annotation[] annos = parentMethod.getParameterAnnotations()[paramIndex];
-    Class<?> paramType = parentMethod.getParameterTypes()[paramIndex];
+  public RuntimeVerifier getBridgeParameterCheck(ParentMethod parentMethod, int paramIndex) {
+    MethodModel method = parentMethod.method();
+    List<Annotation> annos = getMethodParamAnnotations(method, paramIndex);
 
-    // 1. Explicit Configuration
-    for (java.lang.annotation.Annotation anno : annos) {
-      String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
-      TypeSystemConfiguration.ConfigEntry entry = configuration.find(desc);
-      if (entry != null) {
-        if (entry.kind() == ValidationKind.ENFORCE) return entry.verifier();
-        if (entry.kind() == ValidationKind.NOOP) return null;
+    RuntimeVerifier verifier = resolveVerifier(annos);
+    if (verifier != null) return verifier;
+
+    // Check default
+    var paramTypes = method.methodTypeSymbol().parameterList();
+    TypeKind pType = TypeKind.from(paramTypes.get(paramIndex));
+
+    if (pType == TypeKind.REFERENCE) {
+      // Need to ensure we don't default if it was explicitly NOOPed (resolvedVerifier handles NOOP
+      // by returning null if found)
+      // Re-checking NOOP logic because resolveVerifier returns null for BOTH "Noop" and "Not Found"
+      boolean isExplicitNoop = false;
+      for (Annotation a : annos) {
+        TypeSystemConfiguration.ConfigEntry entry =
+            configuration.find(a.classSymbol().descriptorString());
+        if (entry != null && entry.kind() == ValidationKind.NOOP) isExplicitNoop = true;
       }
-    }
 
-    // 2. Default
-    ClassDesc pTypeDesc = ClassDesc.ofDescriptor(paramType.descriptorString());
-    if (TypeKind.from(pTypeDesc) == TypeKind.REFERENCE) {
-      TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
-      if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
-        return defaultEntry.verifier();
+      if (!isExplicitNoop) {
+        TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
+        if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
+          return defaultEntry.verifier();
+        }
       }
     }
     return null;

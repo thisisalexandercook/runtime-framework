@@ -4,6 +4,7 @@ import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.filter.Filter;
 import io.github.eisop.runtimeframework.policy.EnforcementPolicy;
 import io.github.eisop.runtimeframework.resolution.HierarchyResolver;
+import io.github.eisop.runtimeframework.resolution.ParentMethod;
 import java.lang.classfile.ClassBuilder;
 import java.lang.classfile.ClassModel;
 import java.lang.classfile.CodeBuilder;
@@ -19,8 +20,8 @@ import java.lang.classfile.instruction.ReturnInstruction;
 import java.lang.classfile.instruction.StoreInstruction;
 import java.lang.constant.ClassDesc;
 import java.lang.constant.MethodTypeDesc;
-import java.lang.reflect.Method;
-import java.util.Arrays;
+import java.lang.reflect.Modifier;
+import java.util.List;
 
 public class AnnotationInstrumenter extends RuntimeInstrumenter {
 
@@ -159,7 +160,7 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
 
   @Override
   protected void generateBridgeMethods(ClassBuilder builder, ClassModel model, ClassLoader loader) {
-    for (Method parentMethod : hierarchyResolver.resolveUncheckedMethods(model, loader)) {
+    for (ParentMethod parentMethod : hierarchyResolver.resolveUncheckedMethods(model, loader)) {
       if (policy.shouldGenerateBridge(parentMethod)) {
         emitBridge(builder, parentMethod);
       }
@@ -186,28 +187,23 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
     }
   }
 
-  private void emitBridge(ClassBuilder builder, Method parentMethod) {
-    String methodName = parentMethod.getName();
-    MethodTypeDesc desc =
-        MethodTypeDesc.of(
-            ClassDesc.ofDescriptor(parentMethod.getReturnType().descriptorString()),
-            Arrays.stream(parentMethod.getParameterTypes())
-                .map(c -> ClassDesc.ofDescriptor(c.descriptorString()))
-                .toArray(ClassDesc[]::new));
+  private void emitBridge(ClassBuilder builder, ParentMethod parentMethod) {
+    MethodModel method = parentMethod.method();
+    String methodName = method.methodName().stringValue();
+    MethodTypeDesc desc = method.methodTypeSymbol();
 
     builder.withMethod(
         methodName,
         desc,
-        java.lang.reflect.Modifier.PUBLIC,
+        Modifier.PUBLIC,
         methodBuilder -> {
           methodBuilder.withCode(
               codeBuilder -> {
                 int slotIndex = 1;
-                Class<?>[] paramTypes = parentMethod.getParameterTypes();
+                List<ClassDesc> paramTypes = desc.parameterList();
 
-                for (int i = 0; i < paramTypes.length; i++) {
-                  TypeKind type =
-                      TypeKind.from(ClassDesc.ofDescriptor(paramTypes[i].descriptorString()));
+                for (int i = 0; i < paramTypes.size(); i++) {
+                  TypeKind type = TypeKind.from(paramTypes.get(i));
                   RuntimeVerifier target = policy.getBridgeParameterCheck(parentMethod, i);
                   if (target != null) {
                     codeBuilder.aload(slotIndex);
@@ -219,15 +215,18 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
 
                 codeBuilder.aload(0);
                 slotIndex = 1;
-                for (Class<?> pType : paramTypes) {
-                  TypeKind type = TypeKind.from(ClassDesc.ofDescriptor(pType.descriptorString()));
+                for (ClassDesc pType : paramTypes) {
+                  TypeKind type = TypeKind.from(pType);
                   loadLocal(codeBuilder, type, slotIndex);
                   slotIndex += type.slotSize();
                 }
 
-                ClassDesc parentDesc = ClassDesc.of(parentMethod.getDeclaringClass().getName());
+                ClassDesc parentDesc =
+                    ClassDesc.of(
+                        parentMethod.owner().thisClass().asInternalName().replace('/', '.'));
                 codeBuilder.invokespecial(parentDesc, methodName, desc);
-                returnResult(codeBuilder, parentMethod.getReturnType());
+                returnResult(
+                    codeBuilder, ClassDesc.ofDescriptor(desc.returnType().descriptorString()));
               });
         });
   }
@@ -253,12 +252,17 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
     }
   }
 
-  private void returnResult(CodeBuilder b, Class<?> returnType) {
-    if (returnType == void.class) b.return_();
-    else if (returnType == int.class || returnType == boolean.class) b.ireturn();
-    else if (returnType == long.class) b.lreturn();
-    else if (returnType == float.class) b.freturn();
-    else if (returnType == double.class) b.dreturn();
+  private void returnResult(CodeBuilder b, ClassDesc returnType) {
+    String desc = returnType.descriptorString();
+    if (desc.equals("V")) b.return_();
+    else if (desc.equals("I")
+        || desc.equals("Z")
+        || desc.equals("B")
+        || desc.equals("S")
+        || desc.equals("C")) b.ireturn();
+    else if (desc.equals("J")) b.lreturn();
+    else if (desc.equals("F")) b.freturn();
+    else if (desc.equals("D")) b.dreturn();
     else b.areturn();
   }
 }

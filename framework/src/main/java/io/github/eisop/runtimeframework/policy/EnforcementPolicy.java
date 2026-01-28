@@ -1,12 +1,12 @@
 package io.github.eisop.runtimeframework.policy;
 
 import io.github.eisop.runtimeframework.core.RuntimeVerifier;
+import io.github.eisop.runtimeframework.resolution.ParentMethod;
 import java.lang.classfile.ClassModel;
 import java.lang.classfile.FieldModel;
 import java.lang.classfile.MethodModel;
 import java.lang.classfile.TypeKind;
 import java.lang.constant.MethodTypeDesc;
-import java.lang.reflect.Method;
 
 /** Defines the rules for WHEN to inject a runtime check. */
 public interface EnforcementPolicy {
@@ -39,10 +39,10 @@ public interface EnforcementPolicy {
   RuntimeVerifier getBoundaryFieldReadCheck(String owner, String fieldName, TypeKind type);
 
   /** Should we generate a bridge for this inherited method? */
-  boolean shouldGenerateBridge(Method parentMethod);
+  boolean shouldGenerateBridge(ParentMethod parentMethod);
 
   /** For a bridge we are generating, what check applies to this parameter? */
-  RuntimeVerifier getBridgeParameterCheck(Method parentMethod, int paramIndex);
+  RuntimeVerifier getBridgeParameterCheck(ParentMethod parentMethod, int paramIndex);
 
   /** Should we check an value being stored into an array? */
   RuntimeVerifier getArrayStoreCheck(TypeKind componentType);

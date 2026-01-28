@@ -1,7 +1,6 @@
 package io.github.eisop.runtimeframework.resolution;
 
 import java.lang.classfile.ClassModel;
-import java.lang.reflect.Method;
 import java.util.Set;
 
 /**
@@ -15,8 +14,8 @@ public interface HierarchyResolver {
    * class. 2. Are NOT final/private/static. 3. Come from an "Unchecked" (unsafe) ancestor.
    *
    * @param model The class currently being instrumented.
-   * @param loader The ClassLoader to use for loading parent classes.
-   * @return A set of java.lang.reflect.Method objects representing the targets for bridging.
+   * @param loader The ClassLoader to use for loading parent classes (as resources).
+   * @return A set of ParentMethod objects representing the targets for bridging.
    */
-  Set<Method> resolveUncheckedMethods(ClassModel model, ClassLoader loader);
+  Set<ParentMethod> resolveUncheckedMethods(ClassModel model, ClassLoader loader);
 }

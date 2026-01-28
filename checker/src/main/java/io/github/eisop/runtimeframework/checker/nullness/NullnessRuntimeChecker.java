@@ -8,8 +8,8 @@ import io.github.eisop.runtimeframework.core.ValidationKind;
 import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.filter.Filter;
 import io.github.eisop.runtimeframework.policy.EnforcementPolicy;
+import io.github.eisop.runtimeframework.resolution.BytecodeHierarchyResolver;
 import io.github.eisop.runtimeframework.resolution.HierarchyResolver;
-import io.github.eisop.runtimeframework.resolution.ReflectionHierarchyResolver;
 import org.checkerframework.checker.nullness.qual.NonNull;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
@@ -33,7 +33,7 @@ public class NullnessRuntimeChecker extends RuntimeChecker {
     EnforcementPolicy policy = createPolicy(config, filter);
 
     HierarchyResolver resolver =
-        new ReflectionHierarchyResolver(
+        new BytecodeHierarchyResolver(
             className -> filter.test(new ClassInfo(className.replace('.', '/'), null, null)));
 
     return new AnnotationInstrumenter(policy, resolver, filter);
