@@ -5,6 +5,7 @@ import io.github.eisop.runtimeframework.core.RuntimeInstrumenter;
 import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.filter.Filter;
 import io.github.eisop.runtimeframework.qual.AnnotatedFor;
+import java.io.InputStream;
 import java.lang.classfile.Annotation;
 import java.lang.classfile.AnnotationValue;
 import java.lang.classfile.Attributes;
@@ -118,7 +119,7 @@ public class RuntimeTransformer implements ClassFileTransformer {
     String packageInfoPath = packageName + "/package-info.class";
     boolean found = false;
 
-    try (java.io.InputStream is =
+    try (InputStream is =
         (loader != null)
             ? loader.getResourceAsStream(packageInfoPath)
             : ClassLoader.getSystemResourceAsStream(packageInfoPath)) {

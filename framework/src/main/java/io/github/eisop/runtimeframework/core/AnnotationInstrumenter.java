@@ -4,6 +4,7 @@ import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.filter.Filter;
 import io.github.eisop.runtimeframework.policy.EnforcementPolicy;
 import io.github.eisop.runtimeframework.resolution.HierarchyResolver;
+import io.github.eisop.runtimeframework.resolution.ParentMethod;
 import java.lang.classfile.ClassBuilder;
 import java.lang.classfile.ClassModel;
 import java.lang.classfile.CodeBuilder;
@@ -19,6 +20,7 @@ import java.lang.classfile.instruction.ReturnInstruction;
 import java.lang.classfile.instruction.StoreInstruction;
 import java.lang.constant.ClassDesc;
 import java.lang.constant.MethodTypeDesc;
+import java.lang.reflect.Modifier;
 import java.util.List;
 
 public class AnnotationInstrumenter extends RuntimeInstrumenter {
@@ -158,8 +160,7 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
 
   @Override
   protected void generateBridgeMethods(ClassBuilder builder, ClassModel model, ClassLoader loader) {
-    for (io.github.eisop.runtimeframework.resolution.ParentMethod parentMethod :
-        hierarchyResolver.resolveUncheckedMethods(model, loader)) {
+    for (ParentMethod parentMethod : hierarchyResolver.resolveUncheckedMethods(model, loader)) {
       if (policy.shouldGenerateBridge(parentMethod)) {
         emitBridge(builder, parentMethod);
       }
@@ -186,8 +187,7 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
     }
   }
 
-  private void emitBridge(
-      ClassBuilder builder, io.github.eisop.runtimeframework.resolution.ParentMethod parentMethod) {
+  private void emitBridge(ClassBuilder builder, ParentMethod parentMethod) {
     MethodModel method = parentMethod.method();
     String methodName = method.methodName().stringValue();
     MethodTypeDesc desc = method.methodTypeSymbol();
@@ -195,13 +195,12 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
     builder.withMethod(
         methodName,
         desc,
-        java.lang.reflect.Modifier.PUBLIC, // Bridges are usually public
+        Modifier.PUBLIC,
         methodBuilder -> {
           methodBuilder.withCode(
               codeBuilder -> {
                 int slotIndex = 1;
-                // Parse parameter types from descriptor
-                List<java.lang.constant.ClassDesc> paramTypes = desc.parameterList();
+                List<ClassDesc> paramTypes = desc.parameterList();
 
                 for (int i = 0; i < paramTypes.size(); i++) {
                   TypeKind type = TypeKind.from(paramTypes.get(i));
