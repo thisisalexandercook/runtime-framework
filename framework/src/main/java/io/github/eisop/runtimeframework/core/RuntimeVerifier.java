@@ -1,5 +1,6 @@
 package io.github.eisop.runtimeframework.core;
 
+import io.github.eisop.runtimeframework.runtime.AttributionKind;
 import java.lang.classfile.CodeBuilder;
 import java.lang.classfile.TypeKind;
 
@@ -25,4 +26,14 @@ public interface RuntimeVerifier {
    *     error messages.
    */
   void generateCheck(CodeBuilder b, TypeKind type, String diagnosticName);
+
+  /**
+   * Returns a verifier that attributes the violation according to the given strategy.
+   *
+   * @param kind The attribution strategy.
+   * @return A verifier with the specified attribution.
+   */
+  default RuntimeVerifier withAttribution(AttributionKind kind) {
+    return this;
+  }
 }
