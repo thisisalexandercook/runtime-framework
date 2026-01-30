@@ -8,12 +8,22 @@ public class InstanceFieldRead {
         public String poison = null;
     }
 
+    public static void consume(@Nullable Object o) {}
+
     public static void main(String[] args) {
         UncheckedLib lib = new UncheckedLib();
         
-        String s = lib.poison;
-        // :: error: (Local Variable Assignment (Slot 2) must be NonNull)
+        // 1. Read without storage (Argument passing)
+        // :: error: (Read Field 'poison' must be NonNull)
+        consume(lib.poison);
 
-	@Nullable String q = lib.poison;
+        // 2. Assignment
+        // :: error: (Read Field 'poison' must be NonNull)
+        // :: error: (Local Variable Assignment (Slot 2) must be NonNull)
+        String s = lib.poison;
+
+        // 3. Nullable Assignment (Still checks read)
+        // :: error: (Read Field 'poison' must be NonNull)
+        @Nullable String q = lib.poison;
     }
 }
