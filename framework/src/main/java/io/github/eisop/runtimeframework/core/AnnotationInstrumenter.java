@@ -154,8 +154,16 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
 
   @Override
   protected void generateMethodCallCheck(CodeBuilder b, InvokeInstruction invoke) {
-    // empty for now, only need to generate checks when a method call is stored somehwhere
+    RuntimeVerifier target =
+        policy.getBoundaryCallCheck(invoke.owner().asInternalName(), invoke.typeSymbol());
 
+    if (target != null) {
+      b.dup();
+      target.generateCheck(
+          b,
+          TypeKind.REFERENCE,
+          "Return value of " + invoke.name().stringValue() + " (Boundary)");
+    }
   }
 
   @Override
