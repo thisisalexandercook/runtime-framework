@@ -44,6 +44,12 @@ public abstract class RuntimeVerifier {
 
   /** Reports a violation to the current handler. */
   protected static void reportViolation(String checkerName, String message) {
-    handler.handleViolation(checkerName, message);
+    reportViolation(checkerName, message, AttributionKind.LOCAL);
+  }
+
+  /** Reports a violation to the current handler with specific attribution. */
+  protected static void reportViolation(
+      String checkerName, String message, AttributionKind attribution) {
+    handler.handleViolation(checkerName, message, attribution);
   }
 }

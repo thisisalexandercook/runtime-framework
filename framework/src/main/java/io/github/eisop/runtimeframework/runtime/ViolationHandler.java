@@ -9,5 +9,16 @@ public interface ViolationHandler {
    * @param checkerName The name of the checker that detected the violation
    * @param message The descriptive error message provided by the verification logic
    */
-  void handleViolation(String checkerName, String message);
+  default void handleViolation(String checkerName, String message) {
+    handleViolation(checkerName, message, AttributionKind.LOCAL);
+  }
+
+  /**
+   * Handle a reported violation with specific attribution logic.
+   *
+   * @param checkerName The name of the checker that detected the violation
+   * @param message The descriptive error message provided by the verification logic
+   * @param attribution The strategy for determining the source of the error
+   */
+  void handleViolation(String checkerName, String message, AttributionKind attribution);
 }
