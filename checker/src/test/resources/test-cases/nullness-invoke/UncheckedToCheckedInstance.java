@@ -7,21 +7,21 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 public class UncheckedToCheckedInstance {
 
     public void checkedMethod(@NonNull String input) {
-        // :: error: (Parameter 0 must be NonNull)
     }
 
     public void nullableCheckedMethod(@Nullable String input) {
     }
 
     public void mixedCheckedMethod(@Nullable String input, @NonNull String anotherInput) {
-        // :: error: (Parameter 1 must be NonNull)
     }
 
     static class UncheckedCaller {
         public static void invoke(UncheckedToCheckedInstance target) {
+            // :: error: (Parameter 0 must be NonNull)
             target.checkedMethod(null);
-	    target.nullableCheckedMethod(null);
-	    target.mixedCheckedMethod(null, null);
+            target.nullableCheckedMethod(null);
+            // :: error: (Parameter 1 must be NonNull)
+            target.mixedCheckedMethod(null, null);
         }
     }
 
