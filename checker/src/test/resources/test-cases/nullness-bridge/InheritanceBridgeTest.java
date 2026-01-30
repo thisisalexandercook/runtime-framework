@@ -28,9 +28,14 @@ public class InheritanceBridgeTest extends UncheckedParent {
         test.finalAction(null);
         // cannot bridge final methods, no error here
 
-        String unsafe = test.returnAction();
-        // :: error: (Local Variable Assignment (Slot 2) must be NonNull)
+        // :: error: (Return value of inherited method returnAction must be NonNull)
+        test.returnAction();
 
+        // :: error: (Return value of inherited method returnAction must be NonNull)
+        // :: error: (Local Variable Assignment (Slot 2) must be NonNull)
+        String unsafe = test.returnAction();
+
+        // :: error: (Return value of inherited method returnAction must be NonNull)
         @Nullable String again = test.returnAction();
     }
 
