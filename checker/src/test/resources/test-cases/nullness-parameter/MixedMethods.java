@@ -7,32 +7,31 @@ public class MixedMethods {
 
     public static void main(String[] args) {
         // 1. Explicit NonNull
+        // :: error: (Parameter 0 must be NonNull)
         checkExplicit(null);
 
         // 2. Implicit NonNull (Strict Default)
+        // :: error: (Parameter 0 must be NonNull)
         checkImplicit(null);
 
         // 3. Explicit Nullable (Should NOT error)
         checkNullable(null);
 
-	// 3. Explicit Nullable (Should NOT error)
+        // 4. Multiple Parameters
+        // :: error: (Parameter 1 must be NonNull)
+        // :: error: (Parameter 2 must be NonNull)
         checkMultiple(null,null,null,null);
     }
 
     public static void checkExplicit(@NonNull String s) {
-        // :: error: (Parameter 0 must be NonNull)
     }
 
     public static void checkImplicit(String s) {
-        // :: error: (Parameter 0 must be NonNull)
     }
 
     public static void checkNullable(@Nullable String s) {
-        // No error expected here
     }
 
     public static void checkMultiple(@Nullable String s, String q, String r, @Nullable String v) {
-	// :: error: (Parameter 1 must be NonNull)
-	// :: error: (Parameter 2 must be NonNull)
     }
 }

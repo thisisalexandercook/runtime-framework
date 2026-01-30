@@ -5,6 +5,8 @@ import io.github.eisop.runtimeframework.core.TypeSystemConfiguration;
 import io.github.eisop.runtimeframework.core.ValidationKind;
 import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.filter.Filter;
+import io.github.eisop.runtimeframework.policy.EnforcementPolicy;
+import io.github.eisop.runtimeframework.runtime.AttributionKind;
 import io.github.eisop.runtimeframework.resolution.ParentMethod;
 import java.lang.classfile.Annotation;
 import java.lang.classfile.Attributes;
@@ -58,7 +60,8 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
   public RuntimeVerifier getParameterCheck(MethodModel method, int paramIndex, TypeKind type) {
     if (type != TypeKind.REFERENCE) return null;
     List<Annotation> annos = getMethodParamAnnotations(method, paramIndex);
-    return resolveVerifier(annos);
+    RuntimeVerifier verifier = resolveVerifier(annos);
+    return (verifier != null) ? verifier.withAttribution(AttributionKind.CALLER) : null;
   }
 
   @Override
@@ -178,7 +181,7 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
     List<Annotation> annos = getMethodParamAnnotations(method, paramIndex);
 
     RuntimeVerifier verifier = resolveVerifier(annos);
-    if (verifier != null) return verifier;
+    if (verifier != null) return verifier.withAttribution(AttributionKind.CALLER);
 
     // Check default
     var paramTypes = method.methodTypeSymbol().parameterList();
@@ -198,7 +201,7 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
       if (!isExplicitNoop) {
         TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
         if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
-          return defaultEntry.verifier();
+          return defaultEntry.verifier().withAttribution(AttributionKind.CALLER);
         }
       }
     }
