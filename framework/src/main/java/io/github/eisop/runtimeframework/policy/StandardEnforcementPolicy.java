@@ -5,9 +5,8 @@ import io.github.eisop.runtimeframework.core.TypeSystemConfiguration;
 import io.github.eisop.runtimeframework.core.ValidationKind;
 import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.filter.Filter;
-import io.github.eisop.runtimeframework.policy.EnforcementPolicy;
-import io.github.eisop.runtimeframework.runtime.AttributionKind;
 import io.github.eisop.runtimeframework.resolution.ParentMethod;
+import io.github.eisop.runtimeframework.runtime.AttributionKind;
 import java.lang.classfile.Annotation;
 import java.lang.classfile.Attributes;
 import java.lang.classfile.FieldModel;
@@ -248,19 +247,17 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
     RuntimeVerifier verifier = resolveVerifier(annos);
     if (verifier != null) return verifier.withAttribution(AttributionKind.CALLER);
 
-    if (returnType == TypeKind.REFERENCE) { // Redundant but keeps structure similar
-      boolean isExplicitNoop = false;
-      for (Annotation a : annos) {
-        TypeSystemConfiguration.ConfigEntry entry =
-            configuration.find(a.classSymbol().descriptorString());
-        if (entry != null && entry.kind() == ValidationKind.NOOP) isExplicitNoop = true;
-      }
+    boolean isExplicitNoop = false;
+    for (Annotation a : annos) {
+      TypeSystemConfiguration.ConfigEntry entry =
+          configuration.find(a.classSymbol().descriptorString());
+      if (entry != null && entry.kind() == ValidationKind.NOOP) isExplicitNoop = true;
+    }
 
-      if (!isExplicitNoop) {
-        TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
-        if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
-          return defaultEntry.verifier().withAttribution(AttributionKind.CALLER);
-        }
+    if (!isExplicitNoop) {
+      TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
+      if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
+        return defaultEntry.verifier().withAttribution(AttributionKind.CALLER);
       }
     }
     return null;

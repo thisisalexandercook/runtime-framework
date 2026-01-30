@@ -160,9 +160,7 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
     if (target != null) {
       b.dup();
       target.generateCheck(
-          b,
-          TypeKind.REFERENCE,
-          "Return value of " + invoke.name().stringValue() + " (Boundary)");
+          b, TypeKind.REFERENCE, "Return value of " + invoke.name().stringValue() + " (Boundary)");
     }
   }
 
