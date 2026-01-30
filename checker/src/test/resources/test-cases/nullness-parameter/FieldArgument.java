@@ -10,12 +10,15 @@ public class FieldArgument {
     }
 
     public static void main(String[] args) {
+        // :: error: (Read Field 'POISON' must be NonNull)
+        // :: error: (Parameter 0 must be NonNull)
         consume(UncheckedLib.POISON);
-	nullableConsume(UncheckedLib.POISON);
+
+        // :: error: (Read Field 'POISON' must be NonNull)
+	    nullableConsume(UncheckedLib.POISON);
     }
 
     public static void consume(@NonNull String arg) {
-	// :: error: (Parameter 0 must be NonNull)
     }
     
     public static void nullableConsume(@Nullable String arg) {

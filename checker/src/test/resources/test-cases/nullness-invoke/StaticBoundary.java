@@ -12,6 +12,7 @@ public class StaticBoundary {
 
     public static void main(String[] args) {
         String s = UncheckedLib.getNull();
+	// :: error: (Return value of getNull (Boundary) must be NonNull)
 	// :: error: (Local Variable Assignment (Slot 1) must be NonNull)
     }
 

@@ -5,9 +5,8 @@ import io.github.eisop.runtimeframework.core.TypeSystemConfiguration;
 import io.github.eisop.runtimeframework.core.ValidationKind;
 import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.filter.Filter;
-import io.github.eisop.runtimeframework.policy.EnforcementPolicy;
-import io.github.eisop.runtimeframework.runtime.AttributionKind;
 import io.github.eisop.runtimeframework.resolution.ParentMethod;
+import io.github.eisop.runtimeframework.runtime.AttributionKind;
 import java.lang.classfile.Annotation;
 import java.lang.classfile.Attributes;
 import java.lang.classfile.FieldModel;
@@ -146,6 +145,7 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
     // MethodTypeDesc param parsing
     var paramTypes = method.methodTypeSymbol().parameterList();
 
+    // 1. Check Parameters
     for (int i = 0; i < paramTypes.size(); i++) {
       boolean explicitNoop = false;
       boolean explicitEnforce = false;
@@ -172,6 +172,34 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
         }
       }
     }
+
+    // 2. Check Return Type
+    TypeKind returnType = TypeKind.from(method.methodTypeSymbol().returnType());
+    if (returnType == TypeKind.REFERENCE) {
+      boolean explicitNoop = false;
+      boolean explicitEnforce = false;
+
+      List<Annotation> annos = getMethodReturnAnnotations(method);
+
+      for (Annotation anno : annos) {
+        String desc = anno.classSymbol().descriptorString();
+        TypeSystemConfiguration.ConfigEntry entry = configuration.find(desc);
+        if (entry != null) {
+          if (entry.kind() == ValidationKind.ENFORCE) explicitEnforce = true;
+          if (entry.kind() == ValidationKind.NOOP) explicitNoop = true;
+        }
+      }
+
+      if (explicitEnforce) return true;
+
+      if (!explicitNoop) {
+        TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
+        if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
+          return true;
+        }
+      }
+    }
+
     return false;
   }
 
@@ -208,6 +236,33 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
     return null;
   }
 
+  @Override
+  public RuntimeVerifier getBridgeReturnCheck(ParentMethod parentMethod) {
+    MethodModel method = parentMethod.method();
+    TypeKind returnType = TypeKind.from(method.methodTypeSymbol().returnType());
+    if (returnType != TypeKind.REFERENCE) return null;
+
+    List<Annotation> annos = getMethodReturnAnnotations(method);
+
+    RuntimeVerifier verifier = resolveVerifier(annos);
+    if (verifier != null) return verifier.withAttribution(AttributionKind.CALLER);
+
+    boolean isExplicitNoop = false;
+    for (Annotation a : annos) {
+      TypeSystemConfiguration.ConfigEntry entry =
+          configuration.find(a.classSymbol().descriptorString());
+      if (entry != null && entry.kind() == ValidationKind.NOOP) isExplicitNoop = true;
+    }
+
+    if (!isExplicitNoop) {
+      TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
+      if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
+        return defaultEntry.verifier().withAttribution(AttributionKind.CALLER);
+      }
+    }
+    return null;
+  }
+
   // --- Parsing Helpers ---
   private List<Annotation> getMethodParamAnnotations(MethodModel method, int paramIndex) {
     List<Annotation> result = new ArrayList<>();
@@ -225,6 +280,24 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
               for (TypeAnnotation ta : attr.annotations()) {
                 if (ta.targetInfo() instanceof TypeAnnotation.FormalParameterTarget pt
                     && pt.formalParameterIndex() == paramIndex) result.add(ta.annotation());
+              }
+            });
+    return result;
+  }
+
+  private List<Annotation> getMethodReturnAnnotations(MethodModel method) {
+    List<Annotation> result = new ArrayList<>();
+    method
+        .findAttribute(Attributes.runtimeVisibleAnnotations())
+        .ifPresent(attr -> result.addAll(attr.annotations()));
+    method
+        .findAttribute(Attributes.runtimeVisibleTypeAnnotations())
+        .ifPresent(
+            attr -> {
+              for (TypeAnnotation ta : attr.annotations()) {
+                if (ta.targetInfo().targetType() == TypeAnnotation.TargetType.METHOD_RETURN) {
+                  result.add(ta.annotation());
+                }
               }
             });
     return result;

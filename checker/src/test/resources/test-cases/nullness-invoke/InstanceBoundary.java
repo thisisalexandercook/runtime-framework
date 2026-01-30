@@ -13,10 +13,11 @@ public class InstanceBoundary {
         UncheckedLib lib = new UncheckedLib();
         
         String s = lib.getNull();
+	// :: error: (Return value of getNull (Boundary) must be NonNull)
 	// :: error: (Local Variable Assignment (Slot 2) must be NonNull)
 
 	lib.getNull();
-	// currently no explicit check on the return if its not stored 
+	// :: error: (Return value of getNull (Boundary) must be NonNull)
 
     }
 }

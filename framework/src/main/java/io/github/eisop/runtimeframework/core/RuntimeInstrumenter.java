@@ -66,13 +66,7 @@ public abstract class RuntimeInstrumenter {
                             } else if (isFieldRead(fInst)) {
                               codeBuilder.with(element);
                               if (isCheckedScope) {
-                                // generateFieldReadCheck(codeBuilder, fInst, classModel);
-                                // Currently disabling field read checks as the GETFIELD
-                                // and GETSTATIC instructions are not actually dangerous
-                                // on their own. Its when we STORE a field we read from
-                                // that an issue could arise
-                                // TODO: consider method of turning on and off different
-                                // boundary sites
+                                generateFieldReadCheck(codeBuilder, fInst, classModel);
                               }
                             }
                           } else if (element instanceof ReturnInstruction rInst) {

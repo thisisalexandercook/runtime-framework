@@ -12,5 +12,6 @@ public class NullableBoundary {
 
     public static void main(String[] args) {
         @Nullable String s = UncheckedLib.getNull();
+        // :: error: (Return value of getNull (Boundary) must be NonNull)
     }
 }

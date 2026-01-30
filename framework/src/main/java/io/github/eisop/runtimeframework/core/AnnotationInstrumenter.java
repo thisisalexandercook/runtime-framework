@@ -154,8 +154,14 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
 
   @Override
   protected void generateMethodCallCheck(CodeBuilder b, InvokeInstruction invoke) {
-    // empty for now, only need to generate checks when a method call is stored somehwhere
+    RuntimeVerifier target =
+        policy.getBoundaryCallCheck(invoke.owner().asInternalName(), invoke.typeSymbol());
 
+    if (target != null) {
+      b.dup();
+      target.generateCheck(
+          b, TypeKind.REFERENCE, "Return value of " + invoke.name().stringValue() + " (Boundary)");
+    }
   }
 
   @Override
@@ -225,6 +231,16 @@ public class AnnotationInstrumenter extends RuntimeInstrumenter {
                     ClassDesc.of(
                         parentMethod.owner().thisClass().asInternalName().replace('/', '.'));
                 codeBuilder.invokespecial(parentDesc, methodName, desc);
+
+                RuntimeVerifier returnTarget = policy.getBridgeReturnCheck(parentMethod);
+                if (returnTarget != null) {
+                  codeBuilder.dup();
+                  returnTarget.generateCheck(
+                      codeBuilder,
+                      TypeKind.REFERENCE,
+                      "Return value of inherited method " + methodName);
+                }
+
                 returnResult(
                     codeBuilder, ClassDesc.ofDescriptor(desc.returnType().descriptorString()));
               });

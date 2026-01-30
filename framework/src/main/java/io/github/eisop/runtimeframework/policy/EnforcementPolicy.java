@@ -44,6 +44,11 @@ public interface EnforcementPolicy {
   /** For a bridge we are generating, what check applies to this parameter? */
   RuntimeVerifier getBridgeParameterCheck(ParentMethod parentMethod, int paramIndex);
 
+  /** For a bridge we are generating, what check applies to the return value? */
+  default RuntimeVerifier getBridgeReturnCheck(ParentMethod parentMethod) {
+    return null;
+  }
+
   /** Should we check an value being stored into an array? */
   RuntimeVerifier getArrayStoreCheck(TypeKind componentType);
 

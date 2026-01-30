@@ -10,8 +10,7 @@ import java.lang.constant.MethodTypeDesc;
 public class NullnessVerifier implements RuntimeVerifier {
 
   private static final ClassDesc VERIFIER = ClassDesc.of(NullnessRuntimeVerifier.class.getName());
-  private static final ClassDesc ATTRIBUTION_KIND =
-      ClassDesc.of(AttributionKind.class.getName());
+  private static final ClassDesc ATTRIBUTION_KIND = ClassDesc.of(AttributionKind.class.getName());
 
   private static final String METHOD_DEFAULT = "checkNotNull";
   private static final MethodTypeDesc DESC_DEFAULT =
