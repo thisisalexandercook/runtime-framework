@@ -1,25 +1,27 @@
 package io.github.eisop.runtimeframework.policy;
 
-import io.github.eisop.runtimeframework.core.RuntimeVerifier;
+import io.github.eisop.runtimeframework.core.CheckGenerator;
 import io.github.eisop.runtimeframework.core.TypeSystemConfiguration;
 import io.github.eisop.runtimeframework.core.ValidationKind;
 import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.filter.Filter;
+import java.lang.annotation.Annotation;
 import java.lang.classfile.ClassModel;
 import java.lang.classfile.MethodModel;
 import java.lang.classfile.TypeKind;
 import java.lang.constant.ClassDesc;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
-public class GlobalEnforcementPolicy extends StandardEnforcementPolicy {
+public class StrictBoundaryStrategy extends BoundaryStrategy {
 
-  public GlobalEnforcementPolicy(
+  public StrictBoundaryStrategy(
       TypeSystemConfiguration configuration, Filter<ClassInfo> safetyFilter) {
     super(configuration, safetyFilter);
   }
 
   @Override
-  public RuntimeVerifier getBoundaryFieldWriteCheck(String owner, String fieldName, TypeKind type) {
+  public CheckGenerator getBoundaryFieldWriteCheck(String owner, String fieldName, TypeKind type) {
     if (isClassChecked(owner)) {
       if (type == TypeKind.REFERENCE) {
         if (isFieldOptOut(owner, fieldName)) {
@@ -35,7 +37,7 @@ public class GlobalEnforcementPolicy extends StandardEnforcementPolicy {
   }
 
   @Override
-  public RuntimeVerifier getUncheckedOverrideReturnCheck(
+  public CheckGenerator getUncheckedOverrideReturnCheck(
       ClassModel classModel, MethodModel method, ClassLoader loader) {
     String superName =
         classModel.superclass().map(sc -> sc.asInternalName().replace('/', '.')).orElse(null);
@@ -53,14 +55,13 @@ public class GlobalEnforcementPolicy extends StandardEnforcementPolicy {
               String parentDesc = getMethodDescriptor(m);
               if (methodDesc.equals(parentDesc)) {
                 // Check parent method annotations
-                for (java.lang.annotation.Annotation anno : m.getAnnotations()) {
+                for (Annotation anno : m.getAnnotations()) {
                   String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
                   TypeSystemConfiguration.ConfigEntry entry = configuration.find(desc);
                   if (entry != null && entry.kind() == ValidationKind.NOOP) return null;
                 }
                 // Check return type annotations
-                for (java.lang.annotation.Annotation anno :
-                    m.getAnnotatedReturnType().getAnnotations()) {
+                for (Annotation anno : m.getAnnotatedReturnType().getAnnotations()) {
                   String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
                   TypeSystemConfiguration.ConfigEntry entry = configuration.find(desc);
                   if (entry != null && entry.kind() == ValidationKind.NOOP) return null;
@@ -94,7 +95,7 @@ public class GlobalEnforcementPolicy extends StandardEnforcementPolicy {
       String className = internalName.replace('/', '.');
       ClassLoader cl = Thread.currentThread().getContextClassLoader();
       Class<?> clazz = Class.forName(className, false, cl);
-      for (java.lang.annotation.Annotation anno : clazz.getAnnotations()) {
+      for (Annotation anno : clazz.getAnnotations()) {
         if (anno.annotationType()
             .getName()
             .equals("io.github.eisop.runtimeframework.qual.AnnotatedFor")) {
@@ -112,14 +113,14 @@ public class GlobalEnforcementPolicy extends StandardEnforcementPolicy {
       Class<?> clazz =
           Class.forName(
               owner.replace('/', '.'), false, Thread.currentThread().getContextClassLoader());
-      java.lang.reflect.Field field = clazz.getDeclaredField(fieldName);
+      Field field = clazz.getDeclaredField(fieldName);
 
-      for (java.lang.annotation.Annotation anno : field.getAnnotations()) {
+      for (Annotation anno : field.getAnnotations()) {
         String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
         TypeSystemConfiguration.ConfigEntry entry = configuration.find(desc);
         if (entry != null && entry.kind() == ValidationKind.NOOP) return true;
       }
-      for (java.lang.annotation.Annotation anno : field.getAnnotatedType().getAnnotations()) {
+      for (Annotation anno : field.getAnnotatedType().getAnnotations()) {
         String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
         TypeSystemConfiguration.ConfigEntry entry = configuration.find(desc);
         if (entry != null && entry.kind() == ValidationKind.NOOP) return true;

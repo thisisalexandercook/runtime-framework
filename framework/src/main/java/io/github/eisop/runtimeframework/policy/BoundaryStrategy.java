@@ -1,6 +1,6 @@
 package io.github.eisop.runtimeframework.policy;
 
-import io.github.eisop.runtimeframework.core.RuntimeVerifier;
+import io.github.eisop.runtimeframework.core.CheckGenerator;
 import io.github.eisop.runtimeframework.core.TypeSystemConfiguration;
 import io.github.eisop.runtimeframework.core.ValidationKind;
 import io.github.eisop.runtimeframework.filter.ClassInfo;
@@ -17,23 +17,17 @@ import java.lang.constant.MethodTypeDesc;
 import java.util.ArrayList;
 import java.util.List;
 
-public class StandardEnforcementPolicy implements EnforcementPolicy {
+public class BoundaryStrategy implements InstrumentationStrategy {
 
   protected final TypeSystemConfiguration configuration;
   protected final Filter<ClassInfo> safetyFilter;
 
-  public StandardEnforcementPolicy(
-      TypeSystemConfiguration configuration, Filter<ClassInfo> safetyFilter) {
+  public BoundaryStrategy(TypeSystemConfiguration configuration, Filter<ClassInfo> safetyFilter) {
     this.configuration = configuration;
     this.safetyFilter = safetyFilter;
   }
 
-  /**
-   * Resolves the verifier for a given list of annotations. Logic: 1. Check for any annotation that
-   * explicitly ENFORCES. 2. Check for any annotation that explicitly NOOPs. 3. Fallback to default.
-   */
-  protected RuntimeVerifier resolveVerifier(List<Annotation> annotations) {
-    // 1. Look for explicit configuration
+  protected CheckGenerator resolveGenerator(List<Annotation> annotations) {
     for (Annotation a : annotations) {
       String desc = a.classSymbol().descriptorString();
       TypeSystemConfiguration.ConfigEntry entry = configuration.find(desc);
@@ -41,12 +35,11 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
         if (entry.kind() == ValidationKind.ENFORCE) {
           return entry.verifier();
         } else if (entry.kind() == ValidationKind.NOOP) {
-          return null; // Explicitly skipped
+          return null;
         }
       }
     }
 
-    // 2. Fallback to default
     TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
     if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
       return defaultEntry.verifier();
@@ -56,39 +49,39 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
   }
 
   @Override
-  public RuntimeVerifier getParameterCheck(MethodModel method, int paramIndex, TypeKind type) {
+  public CheckGenerator getParameterCheck(MethodModel method, int paramIndex, TypeKind type) {
     if (type != TypeKind.REFERENCE) return null;
     List<Annotation> annos = getMethodParamAnnotations(method, paramIndex);
-    RuntimeVerifier verifier = resolveVerifier(annos);
-    return (verifier != null) ? verifier.withAttribution(AttributionKind.CALLER) : null;
+    CheckGenerator generator = resolveGenerator(annos);
+    return (generator != null) ? generator.withAttribution(AttributionKind.CALLER) : null;
   }
 
   @Override
-  public RuntimeVerifier getFieldWriteCheck(FieldModel field, TypeKind type) {
+  public CheckGenerator getFieldWriteCheck(FieldModel field, TypeKind type) {
     return null;
   }
 
   @Override
-  public RuntimeVerifier getFieldReadCheck(FieldModel field, TypeKind type) {
+  public CheckGenerator getFieldReadCheck(FieldModel field, TypeKind type) {
     if (type != TypeKind.REFERENCE) return null;
     List<Annotation> annos = getFieldAnnotations(field);
-    return resolveVerifier(annos);
+    return resolveGenerator(annos);
   }
 
   @Override
-  public RuntimeVerifier getReturnCheck(MethodModel method) {
+  public CheckGenerator getReturnCheck(MethodModel method) {
     return null;
   }
 
   @Override
-  public RuntimeVerifier getLocalVariableWriteCheck(MethodModel method, int slot, TypeKind type) {
+  public CheckGenerator getLocalVariableWriteCheck(MethodModel method, int slot, TypeKind type) {
     if (type != TypeKind.REFERENCE) return null;
     List<Annotation> annos = getLocalVariableAnnotations(method, slot);
-    return resolveVerifier(annos);
+    return resolveGenerator(annos);
   }
 
   @Override
-  public RuntimeVerifier getArrayStoreCheck(TypeKind componentType) {
+  public CheckGenerator getArrayStoreCheck(TypeKind componentType) {
     if (componentType == TypeKind.REFERENCE) {
       TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
       if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
@@ -99,7 +92,7 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
   }
 
   @Override
-  public RuntimeVerifier getArrayLoadCheck(TypeKind componentType) {
+  public CheckGenerator getArrayLoadCheck(TypeKind componentType) {
     if (componentType == TypeKind.REFERENCE) {
       TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
       if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
@@ -110,7 +103,7 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
   }
 
   @Override
-  public RuntimeVerifier getBoundaryCallCheck(String owner, MethodTypeDesc desc) {
+  public CheckGenerator getBoundaryCallCheck(String owner, MethodTypeDesc desc) {
     boolean isUnchecked = !safetyFilter.test(new ClassInfo(owner, null, null));
     TypeKind returnType = TypeKind.from(desc.returnType());
 
@@ -124,7 +117,7 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
   }
 
   @Override
-  public RuntimeVerifier getBoundaryFieldReadCheck(String owner, String fieldName, TypeKind type) {
+  public CheckGenerator getBoundaryFieldReadCheck(String owner, String fieldName, TypeKind type) {
     boolean isUnchecked = !safetyFilter.test(new ClassInfo(owner, null, null));
     if (isUnchecked && type == TypeKind.REFERENCE) {
       TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
@@ -135,17 +128,13 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
     return null;
   }
 
-  // --- 3. Inheritance Logic ---
-
   @Override
   public boolean shouldGenerateBridge(ParentMethod parentMethod) {
     if (parentMethod.owner().thisClass().asInternalName().equals("java/lang/Object")) return false;
 
     MethodModel method = parentMethod.method();
-    // MethodTypeDesc param parsing
     var paramTypes = method.methodTypeSymbol().parameterList();
 
-    // 1. Check Parameters
     for (int i = 0; i < paramTypes.size(); i++) {
       boolean explicitNoop = false;
       boolean explicitEnforce = false;
@@ -163,7 +152,6 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
 
       if (explicitEnforce) return true;
 
-      // If no explicit decision, check default if it's a reference type
       TypeKind pType = TypeKind.from(paramTypes.get(i));
       if (pType == TypeKind.REFERENCE && !explicitNoop) {
         TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
@@ -173,7 +161,6 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
       }
     }
 
-    // 2. Check Return Type
     TypeKind returnType = TypeKind.from(method.methodTypeSymbol().returnType());
     if (returnType == TypeKind.REFERENCE) {
       boolean explicitNoop = false;
@@ -204,21 +191,18 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
   }
 
   @Override
-  public RuntimeVerifier getBridgeParameterCheck(ParentMethod parentMethod, int paramIndex) {
+  public CheckGenerator getBridgeParameterCheck(ParentMethod parentMethod, int paramIndex) {
     MethodModel method = parentMethod.method();
     List<Annotation> annos = getMethodParamAnnotations(method, paramIndex);
 
-    RuntimeVerifier verifier = resolveVerifier(annos);
-    if (verifier != null) return verifier.withAttribution(AttributionKind.CALLER);
+    CheckGenerator generator = resolveGenerator(annos);
+    if (generator != null) return generator.withAttribution(AttributionKind.CALLER);
 
     // Check default
     var paramTypes = method.methodTypeSymbol().parameterList();
     TypeKind pType = TypeKind.from(paramTypes.get(paramIndex));
 
     if (pType == TypeKind.REFERENCE) {
-      // Need to ensure we don't default if it was explicitly NOOPed (resolvedVerifier handles NOOP
-      // by returning null if found)
-      // Re-checking NOOP logic because resolveVerifier returns null for BOTH "Noop" and "Not Found"
       boolean isExplicitNoop = false;
       for (Annotation a : annos) {
         TypeSystemConfiguration.ConfigEntry entry =
@@ -237,15 +221,15 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
   }
 
   @Override
-  public RuntimeVerifier getBridgeReturnCheck(ParentMethod parentMethod) {
+  public CheckGenerator getBridgeReturnCheck(ParentMethod parentMethod) {
     MethodModel method = parentMethod.method();
     TypeKind returnType = TypeKind.from(method.methodTypeSymbol().returnType());
     if (returnType != TypeKind.REFERENCE) return null;
 
     List<Annotation> annos = getMethodReturnAnnotations(method);
 
-    RuntimeVerifier verifier = resolveVerifier(annos);
-    if (verifier != null) return verifier.withAttribution(AttributionKind.CALLER);
+    CheckGenerator generator = resolveGenerator(annos);
+    if (generator != null) return generator.withAttribution(AttributionKind.CALLER);
 
     boolean isExplicitNoop = false;
     for (Annotation a : annos) {
@@ -263,7 +247,6 @@ public class StandardEnforcementPolicy implements EnforcementPolicy {
     return null;
   }
 
-  // --- Parsing Helpers ---
   private List<Annotation> getMethodParamAnnotations(MethodModel method, int paramIndex) {
     List<Annotation> result = new ArrayList<>();
     method

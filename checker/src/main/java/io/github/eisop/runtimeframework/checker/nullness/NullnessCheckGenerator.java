@@ -1,13 +1,13 @@
 package io.github.eisop.runtimeframework.checker.nullness;
 
-import io.github.eisop.runtimeframework.core.RuntimeVerifier;
+import io.github.eisop.runtimeframework.core.CheckGenerator;
 import io.github.eisop.runtimeframework.runtime.AttributionKind;
 import java.lang.classfile.CodeBuilder;
 import java.lang.classfile.TypeKind;
 import java.lang.constant.ClassDesc;
 import java.lang.constant.MethodTypeDesc;
 
-public class NullnessVerifier implements RuntimeVerifier {
+public class NullnessCheckGenerator implements CheckGenerator {
 
   private static final ClassDesc VERIFIER = ClassDesc.of(NullnessRuntimeVerifier.class.getName());
   private static final ClassDesc ATTRIBUTION_KIND = ClassDesc.of(AttributionKind.class.getName());
@@ -23,18 +23,17 @@ public class NullnessVerifier implements RuntimeVerifier {
 
   private final AttributionKind attribution;
 
-  public NullnessVerifier() {
+  public NullnessCheckGenerator() {
     this(AttributionKind.LOCAL);
   }
 
-  public NullnessVerifier(AttributionKind attribution) {
+  public NullnessCheckGenerator(AttributionKind attribution) {
     this.attribution = attribution;
   }
 
   @Override
-  public RuntimeVerifier withAttribution(AttributionKind kind) {
-    if (this.attribution == kind) return this;
-    return new NullnessVerifier(kind);
+  public CheckGenerator withAttribution(AttributionKind kind) {
+    return new NullnessCheckGenerator(kind);
   }
 
   @Override

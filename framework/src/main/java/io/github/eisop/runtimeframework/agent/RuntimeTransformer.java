@@ -13,7 +13,7 @@ import java.security.ProtectionDomain;
 public class RuntimeTransformer implements ClassFileTransformer {
 
   private final Filter<ClassInfo> scanFilter;
-  private final Filter<ClassInfo> policyFilter;
+  private final Filter<ClassInfo> strategyFilter;
   private final RuntimeChecker checker;
   private final boolean trustAnnotatedFor;
   private final boolean isGlobalMode;
@@ -21,12 +21,12 @@ public class RuntimeTransformer implements ClassFileTransformer {
 
   public RuntimeTransformer(
       Filter<ClassInfo> scanFilter,
-      Filter<ClassInfo> policyFilter,
+      Filter<ClassInfo> strategyFilter,
       RuntimeChecker checker,
       boolean trustAnnotatedFor,
       boolean isGlobalMode) {
     this.scanFilter = scanFilter;
-    this.policyFilter = policyFilter;
+    this.strategyFilter = strategyFilter;
     this.checker = checker;
     this.trustAnnotatedFor = trustAnnotatedFor;
     this.isGlobalMode = isGlobalMode;
@@ -62,7 +62,7 @@ public class RuntimeTransformer implements ClassFileTransformer {
       ClassFile cf = ClassFile.of();
       ClassModel classModel = cf.parse(classfileBuffer);
 
-      boolean isChecked = policyFilter.test(info);
+      boolean isChecked = strategyFilter.test(info);
 
       if (!isChecked && trustAnnotatedFor && annotatedForFilter != null) {
         if (annotatedForFilter.test(classModel, loader)) {
@@ -94,7 +94,7 @@ public class RuntimeTransformer implements ClassFileTransformer {
                 && annotatedForFilter.test(effectiveCtx)) {
               return true;
             }
-            return policyFilter.test(effectiveCtx);
+            return strategyFilter.test(effectiveCtx);
           };
 
       RuntimeInstrumenter instrumenter = checker.getInstrumenter(dynamicFilter);

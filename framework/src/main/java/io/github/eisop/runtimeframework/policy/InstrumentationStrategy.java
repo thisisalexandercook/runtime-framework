@@ -1,6 +1,6 @@
 package io.github.eisop.runtimeframework.policy;
 
-import io.github.eisop.runtimeframework.core.RuntimeVerifier;
+import io.github.eisop.runtimeframework.core.CheckGenerator;
 import io.github.eisop.runtimeframework.resolution.ParentMethod;
 import java.lang.classfile.ClassModel;
 import java.lang.classfile.FieldModel;
@@ -9,57 +9,56 @@ import java.lang.classfile.TypeKind;
 import java.lang.constant.MethodTypeDesc;
 
 /** Defines the rules for WHEN to inject a runtime check. */
-public interface EnforcementPolicy {
+public interface InstrumentationStrategy {
 
   /** Should we check this specific parameter at method entry? */
-  RuntimeVerifier getParameterCheck(MethodModel method, int paramIndex, TypeKind type);
+  CheckGenerator getParameterCheck(MethodModel method, int paramIndex, TypeKind type);
 
   /** Should we check a write to this field? */
-  RuntimeVerifier getFieldWriteCheck(FieldModel field, TypeKind type);
+  CheckGenerator getFieldWriteCheck(FieldModel field, TypeKind type);
 
   /** Should we check a read from this field? */
-  RuntimeVerifier getFieldReadCheck(FieldModel field, TypeKind type);
+  CheckGenerator getFieldReadCheck(FieldModel field, TypeKind type);
 
   /** Should we check this return value? */
-  RuntimeVerifier getReturnCheck(MethodModel method);
+  CheckGenerator getReturnCheck(MethodModel method);
 
   /**
    * Should we check a write to a field in an EXTERNAL class? (Used when Unchecked code writes to
    * Checked code).
    */
-  default RuntimeVerifier getBoundaryFieldWriteCheck(
-      String owner, String fieldName, TypeKind type) {
+  default CheckGenerator getBoundaryFieldWriteCheck(String owner, String fieldName, TypeKind type) {
     return null;
   }
 
   /** We are calling a method on 'owner'. Should we check the result? */
-  RuntimeVerifier getBoundaryCallCheck(String owner, MethodTypeDesc desc);
+  CheckGenerator getBoundaryCallCheck(String owner, MethodTypeDesc desc);
 
   /** We are reading field from an EXTERNAL class. Should we check the value? */
-  RuntimeVerifier getBoundaryFieldReadCheck(String owner, String fieldName, TypeKind type);
+  CheckGenerator getBoundaryFieldReadCheck(String owner, String fieldName, TypeKind type);
 
   /** Should we generate a bridge for this inherited method? */
   boolean shouldGenerateBridge(ParentMethod parentMethod);
 
   /** For a bridge we are generating, what check applies to this parameter? */
-  RuntimeVerifier getBridgeParameterCheck(ParentMethod parentMethod, int paramIndex);
+  CheckGenerator getBridgeParameterCheck(ParentMethod parentMethod, int paramIndex);
 
   /** For a bridge we are generating, what check applies to the return value? */
-  default RuntimeVerifier getBridgeReturnCheck(ParentMethod parentMethod) {
+  default CheckGenerator getBridgeReturnCheck(ParentMethod parentMethod) {
     return null;
   }
 
   /** Should we check an value being stored into an array? */
-  RuntimeVerifier getArrayStoreCheck(TypeKind componentType);
+  CheckGenerator getArrayStoreCheck(TypeKind componentType);
 
   /** Should we check a value being read from an array? */
-  RuntimeVerifier getArrayLoadCheck(TypeKind componentType);
+  CheckGenerator getArrayLoadCheck(TypeKind componentType);
 
   /** Should we check a value being stored in a variable? */
-  RuntimeVerifier getLocalVariableWriteCheck(MethodModel method, int slot, TypeKind type);
+  CheckGenerator getLocalVariableWriteCheck(MethodModel method, int slot, TypeKind type);
 
   /** Should we check the return of an unchecked override? */
-  default RuntimeVerifier getUncheckedOverrideReturnCheck(
+  default CheckGenerator getUncheckedOverrideReturnCheck(
       ClassModel classModel, MethodModel method, ClassLoader loader) {
     return null;
   }

@@ -14,7 +14,7 @@ public final class RuntimeAgent {
 
   public static void premain(String args, Instrumentation inst) {
     Filter<ClassInfo> safeFilter = new FrameworkSafetyFilter();
-    Filter<ClassInfo> policyFilter = safeFilter;
+    Filter<ClassInfo> strategyFilter = safeFilter;
 
     String checkedClasses = System.getProperty("runtime.classes");
     boolean isGlobalMode = Boolean.getBoolean("runtime.global");
@@ -23,12 +23,12 @@ public final class RuntimeAgent {
     if (checkedClasses != null && !checkedClasses.isBlank()) {
       System.out.println("[RuntimeAgent] Checked Scope restricted to: " + checkedClasses);
       Filter<ClassInfo> listFilter = new ClassListFilter(Arrays.asList(checkedClasses.split(",")));
-      policyFilter = info -> safeFilter.test(info) && listFilter.test(info);
+      strategyFilter = info -> safeFilter.test(info) && listFilter.test(info);
     } else if (trustAnnotatedFor) {
-      policyFilter = info -> false;
+      strategyFilter = info -> false;
     }
 
-    Filter<ClassInfo> scanFilter = policyFilter;
+    Filter<ClassInfo> scanFilter = strategyFilter;
     boolean scanAll = false;
 
     if (trustAnnotatedFor) {
@@ -83,7 +83,8 @@ public final class RuntimeAgent {
     }
 
     inst.addTransformer(
-        new RuntimeTransformer(scanFilter, policyFilter, checker, trustAnnotatedFor, isGlobalMode),
+        new RuntimeTransformer(
+            scanFilter, strategyFilter, checker, trustAnnotatedFor, isGlobalMode),
         false);
   }
 }
