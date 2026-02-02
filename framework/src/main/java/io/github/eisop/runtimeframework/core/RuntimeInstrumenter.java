@@ -30,6 +30,9 @@ public abstract class RuntimeInstrumenter {
               methodModel,
               (methodBuilder, methodElement) -> {
                 if (methodElement instanceof CodeAttribute codeModel) {
+                  // Use transformCode to delegate the iteration loop to the library.
+                  // The CodeTransform (EnforcementTransform) handles stateful logic
+                  // like inserting parameter checks at the beginning.
                   methodBuilder.transformCode(
                       codeModel,
                       createCodeTransform(classModel, methodModel, isCheckedScope, loader));
@@ -51,6 +54,7 @@ public abstract class RuntimeInstrumenter {
     };
   }
 
+  // Factory method to get the specific transform (Enforcement, Inference, etc.)
   protected abstract CodeTransform createCodeTransform(
       ClassModel classModel, MethodModel methodModel, boolean isCheckedScope, ClassLoader loader);
 

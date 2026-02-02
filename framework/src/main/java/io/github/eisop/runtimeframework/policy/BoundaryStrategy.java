@@ -135,6 +135,7 @@ public class BoundaryStrategy implements InstrumentationStrategy {
     MethodModel method = parentMethod.method();
     var paramTypes = method.methodTypeSymbol().parameterList();
 
+    // 1. Check Parameters
     for (int i = 0; i < paramTypes.size(); i++) {
       boolean explicitNoop = false;
       boolean explicitEnforce = false;

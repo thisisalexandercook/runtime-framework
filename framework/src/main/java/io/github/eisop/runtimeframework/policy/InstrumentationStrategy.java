@@ -48,6 +48,11 @@ public interface InstrumentationStrategy {
     return null;
   }
 
+  /** For a bridge we are generating, what check applies to the return value? */
+  default RuntimeVerifier getBridgeReturnCheck(ParentMethod parentMethod) {
+    return null;
+  }
+
   /** Should we check an value being stored into an array? */
   CheckGenerator getArrayStoreCheck(TypeKind componentType);
 
