@@ -5,15 +5,21 @@ import io.github.eisop.runtimeframework.core.TypeSystemConfiguration;
 import io.github.eisop.runtimeframework.core.ValidationKind;
 import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.filter.Filter;
-import java.lang.annotation.Annotation;
+import io.github.eisop.runtimeframework.qual.AnnotatedFor;
+import java.io.IOException;
+import java.io.InputStream;
+import java.lang.classfile.Annotation;
+import java.lang.classfile.Attributes;
+import java.lang.classfile.ClassFile;
 import java.lang.classfile.ClassModel;
+import java.lang.classfile.FieldModel;
 import java.lang.classfile.MethodModel;
 import java.lang.classfile.TypeKind;
-import java.lang.constant.ClassDesc;
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
+import java.util.List;
 
 public class StrictBoundaryStrategy extends BoundaryStrategy {
+
+  private static final String ANNOTATED_FOR_DESC = AnnotatedFor.class.descriptorString();
 
   public StrictBoundaryStrategy(
       TypeSystemConfiguration configuration, Filter<ClassInfo> safetyFilter) {
@@ -39,36 +45,28 @@ public class StrictBoundaryStrategy extends BoundaryStrategy {
   @Override
   public CheckGenerator getUncheckedOverrideReturnCheck(
       ClassModel classModel, MethodModel method, ClassLoader loader) {
-    String superName =
-        classModel.superclass().map(sc -> sc.asInternalName().replace('/', '.')).orElse(null);
-    if (superName == null || superName.equals("java.lang.Object")) return null;
+    String superName = classModel.superclass().map(sc -> sc.asInternalName()).orElse(null);
+    if (superName == null || superName.equals("java/lang/Object")) return null;
 
     try {
-      Class<?> parent = Class.forName(superName, false, loader);
-      while (parent != null && parent != Object.class) {
-        String internalName = parent.getName().replace('.', '/');
+      ClassModel parentModel = loadClassModel(superName, loader);
+      while (parentModel != null
+          && !parentModel.thisClass().asInternalName().equals("java/lang/Object")) {
 
-        if (isClassChecked(internalName)) {
-          for (Method m : parent.getDeclaredMethods()) {
-            if (m.getName().equals(method.methodName().stringValue())) {
-              String methodDesc = method.methodTypeSymbol().descriptorString();
-              String parentDesc = getMethodDescriptor(m);
-              if (methodDesc.equals(parentDesc)) {
+        if (isClassCheckedModel(parentModel)) {
+          for (MethodModel m : parentModel.methods()) {
+            if (m.methodName().stringValue().equals(method.methodName().stringValue())) {
+              if (m.methodTypeSymbol()
+                  .descriptorString()
+                  .equals(method.methodTypeSymbol().descriptorString())) {
+
                 // Check parent method annotations
-                for (Annotation anno : m.getAnnotations()) {
-                  String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
-                  TypeSystemConfiguration.ConfigEntry entry = configuration.find(desc);
-                  if (entry != null && entry.kind() == ValidationKind.NOOP) return null;
-                }
-                // Check return type annotations
-                for (Annotation anno : m.getAnnotatedReturnType().getAnnotations()) {
-                  String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
-                  TypeSystemConfiguration.ConfigEntry entry = configuration.find(desc);
-                  if (entry != null && entry.kind() == ValidationKind.NOOP) return null;
-                }
+                if (hasNoopAnnotation(getMethodAnnotations(m))) return null;
 
-                TypeKind returnType =
-                    TypeKind.from(ClassDesc.ofDescriptor(m.getReturnType().descriptorString()));
+                // Check return type annotations
+                if (hasNoopAnnotation(getMethodReturnAnnotations(m))) return null;
+
+                TypeKind returnType = TypeKind.from(m.methodTypeSymbol().returnType());
                 if (returnType == TypeKind.REFERENCE) {
                   TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
                   if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
@@ -79,10 +77,13 @@ public class StrictBoundaryStrategy extends BoundaryStrategy {
             }
           }
         }
-        parent = parent.getSuperclass();
+
+        String nextSuper = parentModel.superclass().map(sc -> sc.asInternalName()).orElse(null);
+        if (nextSuper == null) break;
+        parentModel = loadClassModel(nextSuper, loader);
       }
     } catch (Throwable e) {
-      System.out.println("reflection fail in method override");
+      System.out.println("bytecode parsing fail in method override: " + e.getMessage());
     }
     return null;
   }
@@ -92,52 +93,66 @@ public class StrictBoundaryStrategy extends BoundaryStrategy {
       return true;
     }
     try {
-      String className = internalName.replace('/', '.');
-      ClassLoader cl = Thread.currentThread().getContextClassLoader();
-      Class<?> clazz = Class.forName(className, false, cl);
-      for (Annotation anno : clazz.getAnnotations()) {
-        if (anno.annotationType()
-            .getName()
-            .equals("io.github.eisop.runtimeframework.qual.AnnotatedFor")) {
-          return true;
-        }
-      }
+      // Load bytecode to check annotations
+      ClassModel model =
+          loadClassModel(internalName, Thread.currentThread().getContextClassLoader());
+      return model != null && isClassCheckedModel(model);
     } catch (Throwable e) {
-      System.out.println("Override reflection fail");
+      System.out.println("Override check fail: " + e.getMessage());
     }
     return false;
+  }
+
+  private boolean isClassCheckedModel(ClassModel model) {
+    return model
+        .findAttribute(Attributes.runtimeVisibleAnnotations())
+        .map(
+            attr -> {
+              for (Annotation anno : attr.annotations()) {
+                if (anno.classSymbol().descriptorString().equals(ANNOTATED_FOR_DESC)) {
+                  return true;
+                }
+              }
+              return false;
+            })
+        .orElse(false);
   }
 
   private boolean isFieldOptOut(String owner, String fieldName) {
     try {
-      Class<?> clazz =
-          Class.forName(
-              owner.replace('/', '.'), false, Thread.currentThread().getContextClassLoader());
-      Field field = clazz.getDeclaredField(fieldName);
+      ClassModel model = loadClassModel(owner, Thread.currentThread().getContextClassLoader());
+      if (model == null) return false;
 
-      for (Annotation anno : field.getAnnotations()) {
-        String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
-        TypeSystemConfiguration.ConfigEntry entry = configuration.find(desc);
-        if (entry != null && entry.kind() == ValidationKind.NOOP) return true;
-      }
-      for (Annotation anno : field.getAnnotatedType().getAnnotations()) {
-        String desc = "L" + anno.annotationType().getName().replace('.', '/') + ";";
-        TypeSystemConfiguration.ConfigEntry entry = configuration.find(desc);
-        if (entry != null && entry.kind() == ValidationKind.NOOP) return true;
+      for (FieldModel field : model.fields()) {
+        if (field.fieldName().stringValue().equals(fieldName)) {
+          if (hasNoopAnnotation(getFieldAnnotations(field))) return true;
+        }
       }
     } catch (Throwable t) {
-      System.out.println("reflection fail in is field opt out");
+      System.out.println("bytecode fail in is field opt out");
     }
     return false;
   }
 
-  private String getMethodDescriptor(Method m) {
-    StringBuilder sb = new StringBuilder("(");
-    for (Class<?> p : m.getParameterTypes()) {
-      sb.append(ClassDesc.ofDescriptor(p.descriptorString()).descriptorString());
+  private ClassModel loadClassModel(String internalName, ClassLoader loader) {
+    String resource = internalName + ".class";
+    try (InputStream is =
+        (loader != null)
+            ? loader.getResourceAsStream(resource)
+            : ClassLoader.getSystemResourceAsStream(resource)) {
+      if (is == null) return null;
+      return ClassFile.of().parse(is.readAllBytes());
+    } catch (IOException e) {
+      return null;
     }
-    sb.append(")");
-    sb.append(ClassDesc.ofDescriptor(m.getReturnType().descriptorString()).descriptorString());
-    return sb.toString();
+  }
+
+  private boolean hasNoopAnnotation(List<Annotation> annotations) {
+    for (Annotation anno : annotations) {
+      String desc = anno.classSymbol().descriptorString();
+      TypeSystemConfiguration.ConfigEntry entry = configuration.find(desc);
+      if (entry != null && entry.kind() == ValidationKind.NOOP) return true;
+    }
+    return false;
   }
 }
