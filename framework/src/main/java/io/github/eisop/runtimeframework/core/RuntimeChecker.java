@@ -2,9 +2,9 @@ package io.github.eisop.runtimeframework.core;
 
 import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.filter.Filter;
-import io.github.eisop.runtimeframework.policy.EnforcementPolicy;
-import io.github.eisop.runtimeframework.policy.GlobalEnforcementPolicy;
-import io.github.eisop.runtimeframework.policy.StandardEnforcementPolicy;
+import io.github.eisop.runtimeframework.policy.BoundaryStrategy;
+import io.github.eisop.runtimeframework.policy.InstrumentationStrategy;
+import io.github.eisop.runtimeframework.policy.StrictBoundaryStrategy;
 
 /**
  * Represents a specific type system or check to be enforced (e.g., Nullness, Immutability). This
@@ -24,23 +24,23 @@ public abstract class RuntimeChecker {
   public abstract RuntimeInstrumenter getInstrumenter(Filter<ClassInfo> filter);
 
   /**
-   * Helper method to create the appropriate EnforcementPolicy based on the framework's
+   * Helper method to create the appropriate InstrumentationStrategy based on the framework's
    * configuration (e.g., -Druntime.global=true).
    *
    * <p>Subclasses should use this instead of manually checking system properties.
    *
    * @param config The TypeSystemConfiguration for this checker.
    * @param filter The filter defining the boundary between Checked and Unchecked code.
-   * @return A configured EnforcementPolicy (Standard or Global).
+   * @return A configured InstrumentationStrategy (Standard or Global).
    */
-  protected EnforcementPolicy createPolicy(
+  protected InstrumentationStrategy createStrategy(
       TypeSystemConfiguration config, Filter<ClassInfo> filter) {
 
     boolean isGlobalMode = Boolean.getBoolean("runtime.global");
     if (isGlobalMode) {
-      return new GlobalEnforcementPolicy(config, filter);
+      return new StrictBoundaryStrategy(config, filter);
     } else {
-      return new StandardEnforcementPolicy(config, filter);
+      return new BoundaryStrategy(config, filter);
     }
   }
 }

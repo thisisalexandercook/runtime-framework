@@ -27,7 +27,7 @@ public class TypeSystemConfiguration {
    * @return this configuration (fluent).
    */
   public TypeSystemConfiguration onEnforce(
-      Class<? extends Annotation> annotation, RuntimeVerifier verifier) {
+      Class<? extends Annotation> annotation, CheckGenerator verifier) {
     registry.put(annotation.descriptorString(), new ConfigEntry(ValidationKind.ENFORCE, verifier));
     return this;
   }
@@ -50,7 +50,7 @@ public class TypeSystemConfiguration {
    * @param verifier The verifier (required if kind is ENFORCE).
    * @return this configuration (fluent).
    */
-  public TypeSystemConfiguration withDefault(ValidationKind kind, RuntimeVerifier verifier) {
+  public TypeSystemConfiguration withDefault(ValidationKind kind, CheckGenerator verifier) {
     this.defaultEntry = new ConfigEntry(kind, verifier);
     return this;
   }
@@ -67,5 +67,5 @@ public class TypeSystemConfiguration {
     return defaultEntry;
   }
 
-  public record ConfigEntry(ValidationKind kind, RuntimeVerifier verifier) {}
+  public record ConfigEntry(ValidationKind kind, CheckGenerator verifier) {}
 }

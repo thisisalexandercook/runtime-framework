@@ -11,7 +11,7 @@ import java.lang.classfile.TypeKind;
  * operand stack satisfies a specific property.
  */
 @FunctionalInterface
-public interface RuntimeVerifier {
+public interface CheckGenerator {
 
   /**
    * Generates bytecode to verify a property.
@@ -33,7 +33,7 @@ public interface RuntimeVerifier {
    * @param kind The attribution strategy.
    * @return A verifier with the specified attribution.
    */
-  default RuntimeVerifier withAttribution(AttributionKind kind) {
+  default CheckGenerator withAttribution(AttributionKind kind) {
     return this;
   }
 }

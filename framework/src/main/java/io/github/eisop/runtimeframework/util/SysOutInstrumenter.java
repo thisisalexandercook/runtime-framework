@@ -4,8 +4,9 @@ import io.github.eisop.runtimeframework.core.RuntimeInstrumenter;
 import java.lang.classfile.ClassBuilder;
 import java.lang.classfile.ClassModel;
 import java.lang.classfile.CodeBuilder;
+import java.lang.classfile.CodeElement;
+import java.lang.classfile.CodeTransform;
 import java.lang.classfile.MethodModel;
-import java.lang.classfile.TypeKind;
 import java.lang.classfile.instruction.ArrayLoadInstruction;
 import java.lang.classfile.instruction.ArrayStoreInstruction;
 import java.lang.classfile.instruction.FieldInstruction;
@@ -27,78 +28,62 @@ public class SysOutInstrumenter extends RuntimeInstrumenter {
     super(info -> true);
   }
 
-  private void print(CodeBuilder b, String msg) {
+  @Override
+  protected CodeTransform createCodeTransform(
+      ClassModel classModel, MethodModel methodModel, boolean isCheckedScope, ClassLoader loader) {
+    return new SysOutTransform();
+  }
+
+  @Override
+  protected void generateBridgeMethods(ClassBuilder builder, ClassModel model, ClassLoader loader) {
+    // Debug instrumenter does not generate bridges
+  }
+
+  private static void print(CodeBuilder b, String msg) {
     b.getstatic(SYSOUT_SYSTEM, "out", SYSOUT_STREAM);
     b.ldc(msg);
     b.invokevirtual(SYSOUT_STREAM, "println", SYSOUT_PRINTLN);
   }
 
-  @Override
-  protected void generateParameterCheck(
-      CodeBuilder b, int slotIndex, TypeKind type, MethodModel method, int paramIndex) {
-    print(b, "   [Param Check] Verifying argument at slot " + slotIndex);
-  }
+  private static class SysOutTransform implements CodeTransform {
 
-  @Override
-  protected void generateFieldWriteCheck(
-      CodeBuilder b, FieldInstruction field, ClassModel classModel) {
-    print(b, "   [Field Write] About to write to: " + field.name().stringValue());
-  }
+    @Override
+    public void accept(CodeBuilder b, CodeElement element) {
+      if (element instanceof FieldInstruction f) {
+        if (isWrite(f)) {
+          print(b, "   [Field Write] About to write to: " + f.name().stringValue());
+          b.with(element);
+        } else {
+          b.with(element);
+          print(b, "   [Field Read] Just read from: " + f.name().stringValue());
+        }
+      } else if (element instanceof ReturnInstruction r) {
+        print(b, "   [Return Check] Returning from method via opcode: " + r.opcode().name());
+        b.with(element);
+      } else if (element instanceof InvokeInstruction i) {
+        b.with(element);
+        print(
+            b,
+            "   [Call Site] Just called: "
+                + i.owner().asInternalName()
+                + "."
+                + i.name().stringValue());
+      } else if (element instanceof ArrayLoadInstruction) {
+        b.with(element);
+        print(b, "   [Array Load] Reading from array");
+      } else if (element instanceof ArrayStoreInstruction) {
+        print(b, "   [Array Store] Writing to array");
+        b.with(element);
+      } else if (element instanceof StoreInstruction s) {
+        print(b, "   [Local Store] Writing to slot " + s.slot());
+        b.with(element);
+      } else {
+        b.with(element);
+      }
+    }
 
-  @Override
-  protected void generateFieldReadCheck(
-      CodeBuilder b, FieldInstruction field, ClassModel classModel) {
-    print(b, "   [Field Read] Just read from: " + field.name().stringValue());
-  }
-
-  @Override
-  protected void generateReturnCheck(CodeBuilder b, ReturnInstruction ret, MethodModel method) {
-    print(b, "   [Return Check] Returning from method via opcode: " + ret.opcode().name());
-  }
-
-  @Override
-  protected void generateUncheckedReturnCheck(
-      CodeBuilder b,
-      ReturnInstruction ret,
-      MethodModel method,
-      ClassModel classModel,
-      ClassLoader loader) {
-    print(
-        b,
-        "   [Unchecked Override Return Check] Checking return of overridden method: "
-            + method.methodName().stringValue());
-  }
-
-  @Override
-  protected void generateMethodCallCheck(CodeBuilder b, InvokeInstruction invoke) {
-    print(
-        b,
-        "   [Call Site] Just called: "
-            + invoke.owner().asInternalName()
-            + "."
-            + invoke.name().stringValue());
-  }
-
-  @Override
-  protected void generateBridgeMethods(ClassBuilder builder, ClassModel model, ClassLoader loader) {
-    // Debug instrumenter does not generate bridges, but we can log that the hook was hit
-    // System.out.println("[SysOutInstrumenter] Bridge hook triggered for: " +
-    // model.thisClass().asInternalName());
-  }
-
-  @Override
-  protected void generateArrayLoadCheck(CodeBuilder b, ArrayLoadInstruction instruction) {
-    print(b, "   [Array Load] Reading from array");
-  }
-
-  @Override
-  protected void generateArrayStoreCheck(CodeBuilder b, ArrayStoreInstruction instruction) {
-    print(b, "   [Array Store] Writing to array");
-  }
-
-  @Override
-  protected void generateStoreCheck(
-      CodeBuilder b, StoreInstruction instruction, MethodModel method) {
-    print(b, "   [Local Store] Writing to slot " + instruction.slot());
+    private boolean isWrite(FieldInstruction f) {
+      return f.opcode().name().startsWith("PUT");
+    }
   }
 }

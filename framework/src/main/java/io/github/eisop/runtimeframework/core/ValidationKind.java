@@ -1,10 +1,10 @@
 package io.github.eisop.runtimeframework.core;
 
-/** Defines the semantic behavior of a qualifier in the runtime system. */
+/** Defines the type of validation logic to apply for a specific annotation. */
 public enum ValidationKind {
   /**
-   * The qualifier requires runtime verification. The associated {@link RuntimeVerifier} will be
-   * invoked.
+   * The qualifier requires runtime verification. The associated {@link CheckGenerator} will be
+   * invoked to generate the check logic.
    */
   ENFORCE,
 
