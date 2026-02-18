@@ -107,13 +107,14 @@ public class BoundaryStrategy implements InstrumentationStrategy {
   }
 
   @Override
-  public CheckGenerator getBoundaryFieldWriteCheck(String owner, String fieldName, TypeKind type) {
+  public CheckGenerator getBoundaryFieldWriteCheck(
+      String owner, String fieldName, TypeKind type, ClassLoader loader) {
     if (!policy.isGlobalMode() || type != TypeKind.REFERENCE) {
       return null;
     }
 
-    if (policy.isChecked(new ClassInfo(owner, null, null))) {
-      if (isFieldOptOut(owner, fieldName, null)) {
+    if (policy.isChecked(new ClassInfo(owner, loader, null))) {
+      if (isFieldOptOut(owner, fieldName, loader)) {
         return null;
       }
       TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
@@ -125,10 +126,11 @@ public class BoundaryStrategy implements InstrumentationStrategy {
   }
 
   @Override
-  public CheckGenerator getBoundaryCallCheck(String owner, MethodTypeDesc desc) {
+  public CheckGenerator getBoundaryCallCheck(
+      String owner, MethodTypeDesc desc, ClassLoader loader) {
     TypeKind returnType = TypeKind.from(desc.returnType());
 
-    if (isUncheckedBoundaryOwner(owner) && returnType == TypeKind.REFERENCE) {
+    if (isUncheckedBoundaryOwner(owner, loader) && returnType == TypeKind.REFERENCE) {
       TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
       if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
         return defaultEntry.verifier();
@@ -138,8 +140,9 @@ public class BoundaryStrategy implements InstrumentationStrategy {
   }
 
   @Override
-  public CheckGenerator getBoundaryFieldReadCheck(String owner, String fieldName, TypeKind type) {
-    if (isUncheckedBoundaryOwner(owner) && type == TypeKind.REFERENCE) {
+  public CheckGenerator getBoundaryFieldReadCheck(
+      String owner, String fieldName, TypeKind type, ClassLoader loader) {
+    if (isUncheckedBoundaryOwner(owner, loader) && type == TypeKind.REFERENCE) {
       TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
       if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
         return defaultEntry.verifier();
@@ -406,8 +409,8 @@ public class BoundaryStrategy implements InstrumentationStrategy {
     return result;
   }
 
-  private boolean isUncheckedBoundaryOwner(String owner) {
-    return !policy.isChecked(new ClassInfo(owner, null, null));
+  private boolean isUncheckedBoundaryOwner(String owner, ClassLoader loader) {
+    return !policy.isChecked(new ClassInfo(owner, loader, null));
   }
 
   private boolean isFieldOptOut(String owner, String fieldName, ClassLoader loader) {

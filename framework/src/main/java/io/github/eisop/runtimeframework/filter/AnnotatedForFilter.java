@@ -39,9 +39,10 @@ public class AnnotatedForFilter implements Filter<ClassInfo> {
    */
   public boolean test(ClassModel model, ClassLoader loader) {
     String className = model.thisClass().asInternalName();
+    String cacheKey = cacheKey(className, loader);
 
-    if (cache.containsKey(className)) {
-      return cache.get(className);
+    if (cache.containsKey(cacheKey)) {
+      return cache.get(cacheKey);
     }
 
     boolean result = hasAnnotatedFor(model);
@@ -49,7 +50,7 @@ public class AnnotatedForFilter implements Filter<ClassInfo> {
       result = hasPackageLevelAnnotation(className, loader);
     }
 
-    cache.put(className, result);
+    cache.put(cacheKey, result);
     return result;
   }
 
@@ -57,9 +58,10 @@ public class AnnotatedForFilter implements Filter<ClassInfo> {
   public boolean test(ClassInfo info) {
     String className = info.internalName();
     if (className == null) return false;
+    String cacheKey = cacheKey(className, info.loader());
 
-    if (cache.containsKey(className)) {
-      return cache.get(className);
+    if (cache.containsKey(cacheKey)) {
+      return cache.get(cacheKey);
     }
 
     boolean result = false;
@@ -78,7 +80,7 @@ public class AnnotatedForFilter implements Filter<ClassInfo> {
       System.err.println("[AnnotatedForFilter] Failed to load bytecode for: " + className);
     }
 
-    cache.put(className, result);
+    cache.put(cacheKey, result);
     return result;
   }
 
@@ -116,5 +118,10 @@ public class AnnotatedForFilter implements Filter<ClassInfo> {
               return false;
             })
         .orElse(false);
+  }
+
+  private static String cacheKey(String className, ClassLoader loader) {
+    int loaderId = (loader == null) ? 0 : System.identityHashCode(loader);
+    return className + "#" + loaderId;
   }
 }
