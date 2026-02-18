@@ -38,7 +38,11 @@ public class DefaultRuntimePolicyTest {
   public void explicitCheckedListMatchesAsChecked() {
     RuntimePolicy policy =
         new DefaultRuntimePolicy(
-            Filter.acceptAll(), new ClassListFilter(java.util.List.of("com.app.Foo")), false, false, "nullness");
+            Filter.acceptAll(),
+            new ClassListFilter(java.util.List.of("com.app.Foo")),
+            false,
+            false,
+            "nullness");
 
     ClassInfo hit = classInfo("com/app/Foo", DefaultRuntimePolicyTest.class.getClassLoader());
     assertEquals(ClassClassification.CHECKED, policy.classify(hit));
@@ -48,7 +52,11 @@ public class DefaultRuntimePolicyTest {
   public void explicitCheckedListMissesAsSkipInStandard() {
     RuntimePolicy policy =
         new DefaultRuntimePolicy(
-            Filter.acceptAll(), new ClassListFilter(java.util.List.of("com.app.Foo")), false, false, "nullness");
+            Filter.acceptAll(),
+            new ClassListFilter(java.util.List.of("com.app.Foo")),
+            false,
+            false,
+            "nullness");
 
     ClassInfo miss = classInfo("com/app/Bar", DefaultRuntimePolicyTest.class.getClassLoader());
     assertEquals(ClassClassification.SKIP, policy.classify(miss));
@@ -58,7 +66,11 @@ public class DefaultRuntimePolicyTest {
   public void explicitCheckedListMissesAsUncheckedInGlobal() {
     RuntimePolicy policy =
         new DefaultRuntimePolicy(
-            Filter.acceptAll(), new ClassListFilter(java.util.List.of("com.app.Foo")), true, false, "nullness");
+            Filter.acceptAll(),
+            new ClassListFilter(java.util.List.of("com.app.Foo")),
+            true,
+            false,
+            "nullness");
 
     ClassInfo miss = classInfo("com/app/Bar", DefaultRuntimePolicyTest.class.getClassLoader());
     assertEquals(ClassClassification.UNCHECKED, policy.classify(miss));
@@ -70,7 +82,8 @@ public class DefaultRuntimePolicyTest {
         new DefaultRuntimePolicy(Filter.acceptAll(), Filter.rejectAll(), false, true, "nullness");
 
     ClassModel model = parseClassModel(AnnotatedFixture.class);
-    ClassInfo info = classInfo(internalName(AnnotatedFixture.class), AnnotatedFixture.class.getClassLoader());
+    ClassInfo info =
+        classInfo(internalName(AnnotatedFixture.class), AnnotatedFixture.class.getClassLoader());
     assertEquals(ClassClassification.CHECKED, policy.classify(info, model));
   }
 
@@ -81,7 +94,8 @@ public class DefaultRuntimePolicyTest {
 
     ClassModel model = parseClassModel(UnannotatedFixture.class);
     ClassInfo info =
-        classInfo(internalName(UnannotatedFixture.class), UnannotatedFixture.class.getClassLoader());
+        classInfo(
+            internalName(UnannotatedFixture.class), UnannotatedFixture.class.getClassLoader());
     assertEquals(ClassClassification.SKIP, policy.classify(info, model));
   }
 
@@ -92,7 +106,8 @@ public class DefaultRuntimePolicyTest {
 
     ClassModel model = parseClassModel(UnannotatedFixture.class);
     ClassInfo info =
-        classInfo(internalName(UnannotatedFixture.class), UnannotatedFixture.class.getClassLoader());
+        classInfo(
+            internalName(UnannotatedFixture.class), UnannotatedFixture.class.getClassLoader());
     assertEquals(ClassClassification.UNCHECKED, policy.classify(info, model));
   }
 
