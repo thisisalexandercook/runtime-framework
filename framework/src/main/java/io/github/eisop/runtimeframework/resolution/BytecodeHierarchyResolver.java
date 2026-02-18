@@ -1,5 +1,6 @@
 package io.github.eisop.runtimeframework.resolution;
 
+import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.filter.Filter;
 import java.io.IOException;
 import java.io.InputStream;
@@ -12,10 +13,10 @@ import java.util.Set;
 
 public class BytecodeHierarchyResolver implements HierarchyResolver {
 
-  private final Filter<String> safetyFilter;
+  private final Filter<ClassInfo> checkedScopeFilter;
 
-  public BytecodeHierarchyResolver(Filter<String> safetyFilter) {
-    this.safetyFilter = safetyFilter;
+  public BytecodeHierarchyResolver(Filter<ClassInfo> checkedScopeFilter) {
+    this.checkedScopeFilter = checkedScopeFilter;
   }
 
   @Override
@@ -38,11 +39,15 @@ public class BytecodeHierarchyResolver implements HierarchyResolver {
 
     String currentName = superName;
     while (currentName != null && !currentName.equals("java.lang.Object")) {
-      if (safetyFilter.test(currentName)) {
+      String currentInternalName = currentName.replace('.', '/');
+      if (checkedScopeFilter.test(new ClassInfo(currentInternalName, loader, null))) {
         break;
       }
 
-      try (InputStream is = loader.getResourceAsStream(currentName.replace('.', '/') + ".class")) {
+      try (InputStream is =
+          (loader != null)
+              ? loader.getResourceAsStream(currentInternalName + ".class")
+              : ClassLoader.getSystemResourceAsStream(currentInternalName + ".class")) {
         if (is == null) {
           break;
         }

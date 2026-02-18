@@ -16,8 +16,8 @@ public class FrameworkSafetyFilter implements Filter<ClassInfo> {
       return false;
     }
 
-    // 2. Skip the runtime framework itself
-    if (name.startsWith("io/github/eisop/")) {
+    // 2. Skip the runtime framework internals
+    if (name.startsWith("io/github/eisop/runtimeframework/")) {
       return false;
     }
 

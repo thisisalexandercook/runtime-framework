@@ -27,15 +27,17 @@ public interface InstrumentationStrategy {
    * Should we check a write to a field in an EXTERNAL class? (Used when Unchecked code writes to
    * Checked code).
    */
-  default CheckGenerator getBoundaryFieldWriteCheck(String owner, String fieldName, TypeKind type) {
+  default CheckGenerator getBoundaryFieldWriteCheck(
+      String owner, String fieldName, TypeKind type, ClassLoader loader) {
     return null;
   }
 
   /** We are calling a method on 'owner'. Should we check the result? */
-  CheckGenerator getBoundaryCallCheck(String owner, MethodTypeDesc desc);
+  CheckGenerator getBoundaryCallCheck(String owner, MethodTypeDesc desc, ClassLoader loader);
 
   /** We are reading field from an EXTERNAL class. Should we check the value? */
-  CheckGenerator getBoundaryFieldReadCheck(String owner, String fieldName, TypeKind type);
+  CheckGenerator getBoundaryFieldReadCheck(
+      String owner, String fieldName, TypeKind type, ClassLoader loader);
 
   /** Should we generate a bridge for this inherited method? */
   boolean shouldGenerateBridge(ParentMethod parentMethod);

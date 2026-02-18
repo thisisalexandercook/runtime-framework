@@ -4,11 +4,15 @@ import io.github.eisop.runtimeframework.core.CheckGenerator;
 import io.github.eisop.runtimeframework.core.TypeSystemConfiguration;
 import io.github.eisop.runtimeframework.core.ValidationKind;
 import io.github.eisop.runtimeframework.filter.ClassInfo;
-import io.github.eisop.runtimeframework.filter.Filter;
+import io.github.eisop.runtimeframework.policy.RuntimePolicy;
 import io.github.eisop.runtimeframework.resolution.ParentMethod;
 import io.github.eisop.runtimeframework.runtime.AttributionKind;
+import java.io.IOException;
+import java.io.InputStream;
 import java.lang.classfile.Annotation;
 import java.lang.classfile.Attributes;
+import java.lang.classfile.ClassFile;
+import java.lang.classfile.ClassModel;
 import java.lang.classfile.FieldModel;
 import java.lang.classfile.MethodModel;
 import java.lang.classfile.TypeAnnotation;
@@ -20,11 +24,11 @@ import java.util.List;
 public class BoundaryStrategy implements InstrumentationStrategy {
 
   protected final TypeSystemConfiguration configuration;
-  protected final Filter<ClassInfo> safetyFilter;
+  protected final RuntimePolicy policy;
 
-  public BoundaryStrategy(TypeSystemConfiguration configuration, Filter<ClassInfo> safetyFilter) {
+  public BoundaryStrategy(TypeSystemConfiguration configuration, RuntimePolicy policy) {
     this.configuration = configuration;
-    this.safetyFilter = safetyFilter;
+    this.policy = policy;
   }
 
   protected CheckGenerator resolveGenerator(List<Annotation> annotations) {
@@ -103,11 +107,16 @@ public class BoundaryStrategy implements InstrumentationStrategy {
   }
 
   @Override
-  public CheckGenerator getBoundaryCallCheck(String owner, MethodTypeDesc desc) {
-    boolean isUnchecked = !safetyFilter.test(new ClassInfo(owner, null, null));
-    TypeKind returnType = TypeKind.from(desc.returnType());
+  public CheckGenerator getBoundaryFieldWriteCheck(
+      String owner, String fieldName, TypeKind type, ClassLoader loader) {
+    if (!policy.isGlobalMode() || type != TypeKind.REFERENCE) {
+      return null;
+    }
 
-    if (isUnchecked && returnType == TypeKind.REFERENCE) {
+    if (policy.isChecked(new ClassInfo(owner, loader, null))) {
+      if (isFieldOptOut(owner, fieldName, loader)) {
+        return null;
+      }
       TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
       if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
         return defaultEntry.verifier();
@@ -117,9 +126,23 @@ public class BoundaryStrategy implements InstrumentationStrategy {
   }
 
   @Override
-  public CheckGenerator getBoundaryFieldReadCheck(String owner, String fieldName, TypeKind type) {
-    boolean isUnchecked = !safetyFilter.test(new ClassInfo(owner, null, null));
-    if (isUnchecked && type == TypeKind.REFERENCE) {
+  public CheckGenerator getBoundaryCallCheck(
+      String owner, MethodTypeDesc desc, ClassLoader loader) {
+    TypeKind returnType = TypeKind.from(desc.returnType());
+
+    if (isUncheckedBoundaryOwner(owner, loader) && returnType == TypeKind.REFERENCE) {
+      TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
+      if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
+        return defaultEntry.verifier();
+      }
+    }
+    return null;
+  }
+
+  @Override
+  public CheckGenerator getBoundaryFieldReadCheck(
+      String owner, String fieldName, TypeKind type, ClassLoader loader) {
+    if (isUncheckedBoundaryOwner(owner, loader) && type == TypeKind.REFERENCE) {
       TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
       if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
         return defaultEntry.verifier();
@@ -248,6 +271,56 @@ public class BoundaryStrategy implements InstrumentationStrategy {
     return null;
   }
 
+  @Override
+  public CheckGenerator getUncheckedOverrideReturnCheck(
+      ClassModel classModel, MethodModel method, ClassLoader loader) {
+    if (!policy.isGlobalMode()) {
+      return null;
+    }
+
+    String superName = classModel.superclass().map(sc -> sc.asInternalName()).orElse(null);
+    if (superName == null || superName.equals("java/lang/Object")) return null;
+
+    try {
+      ClassModel parentModel = loadClassModel(superName, loader);
+      while (parentModel != null
+          && !parentModel.thisClass().asInternalName().equals("java/lang/Object")) {
+
+        if (policy.isChecked(
+            new ClassInfo(parentModel.thisClass().asInternalName(), loader, null), parentModel)) {
+          for (MethodModel m : parentModel.methods()) {
+            if (m.methodName().stringValue().equals(method.methodName().stringValue())
+                && m.methodTypeSymbol()
+                    .descriptorString()
+                    .equals(method.methodTypeSymbol().descriptorString())) {
+
+              if (hasNoopAnnotation(getMethodAnnotations(m))
+                  || hasNoopAnnotation(getMethodReturnAnnotations(m))) {
+                return null;
+              }
+
+              TypeKind returnType = TypeKind.from(m.methodTypeSymbol().returnType());
+              if (returnType == TypeKind.REFERENCE) {
+                TypeSystemConfiguration.ConfigEntry defaultEntry = configuration.getDefault();
+                if (defaultEntry != null && defaultEntry.kind() == ValidationKind.ENFORCE) {
+                  return defaultEntry.verifier();
+                }
+              }
+            }
+          }
+        }
+
+        String nextSuper = parentModel.superclass().map(sc -> sc.asInternalName()).orElse(null);
+        if (nextSuper == null) break;
+        parentModel = loadClassModel(nextSuper, loader);
+      }
+    } catch (Throwable e) {
+      System.out.println("bytecode parsing fail in method override: " + e.getMessage());
+    }
+
+    return null;
+  }
+
   protected List<Annotation> getMethodAnnotations(MethodModel method) {
     List<Annotation> result = new ArrayList<>();
     method
@@ -334,5 +407,47 @@ public class BoundaryStrategy implements InstrumentationStrategy {
                       });
             });
     return result;
+  }
+
+  private boolean isUncheckedBoundaryOwner(String owner, ClassLoader loader) {
+    return !policy.isChecked(new ClassInfo(owner, loader, null));
+  }
+
+  private boolean isFieldOptOut(String owner, String fieldName, ClassLoader loader) {
+    try {
+      ClassModel model = loadClassModel(owner, loader);
+      if (model == null) return false;
+
+      for (FieldModel field : model.fields()) {
+        if (field.fieldName().stringValue().equals(fieldName)) {
+          if (hasNoopAnnotation(getFieldAnnotations(field))) return true;
+        }
+      }
+    } catch (Throwable t) {
+      System.out.println("bytecode fail in is field opt out");
+    }
+    return false;
+  }
+
+  private ClassModel loadClassModel(String internalName, ClassLoader loader) {
+    String resource = internalName + ".class";
+    try (InputStream is =
+        (loader != null)
+            ? loader.getResourceAsStream(resource)
+            : ClassLoader.getSystemResourceAsStream(resource)) {
+      if (is == null) return null;
+      return ClassFile.of().parse(is.readAllBytes());
+    } catch (IOException e) {
+      return null;
+    }
+  }
+
+  private boolean hasNoopAnnotation(List<Annotation> annotations) {
+    for (Annotation anno : annotations) {
+      String desc = anno.classSymbol().descriptorString();
+      TypeSystemConfiguration.ConfigEntry entry = configuration.find(desc);
+      if (entry != null && entry.kind() == ValidationKind.NOOP) return true;
+    }
+    return false;
   }
 }

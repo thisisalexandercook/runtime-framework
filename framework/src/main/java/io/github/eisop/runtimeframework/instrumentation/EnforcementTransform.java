@@ -161,7 +161,7 @@ public class EnforcementTransform implements CodeTransform {
     } else {
       target =
           strategy.getBoundaryFieldWriteCheck(
-              field.owner().asInternalName(), field.name().stringValue(), type);
+              field.owner().asInternalName(), field.name().stringValue(), type, loader);
     }
 
     if (target != null) {
@@ -188,7 +188,7 @@ public class EnforcementTransform implements CodeTransform {
     } else {
       target =
           strategy.getBoundaryFieldReadCheck(
-              field.owner().asInternalName(), field.name().stringValue(), type);
+              field.owner().asInternalName(), field.name().stringValue(), type, loader);
     }
 
     if (target != null) {
@@ -224,7 +224,7 @@ public class EnforcementTransform implements CodeTransform {
 
   private void emitMethodCallCheck(CodeBuilder b, InvokeInstruction invoke) {
     CheckGenerator target =
-        strategy.getBoundaryCallCheck(invoke.owner().asInternalName(), invoke.typeSymbol());
+        strategy.getBoundaryCallCheck(invoke.owner().asInternalName(), invoke.typeSymbol(), loader);
 
     if (target != null) {
       b.dup();
