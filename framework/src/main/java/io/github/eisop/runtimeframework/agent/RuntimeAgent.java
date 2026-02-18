@@ -68,7 +68,8 @@ public final class RuntimeAgent {
 
     String checkerClassName =
         System.getProperty(
-            "runtime.checker", "io.github.eisop.runtimeframework.util.SysOutRuntimeChecker");
+            "runtime.checker",
+            "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker");
 
     RuntimeChecker checker;
     try {
