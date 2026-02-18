@@ -22,7 +22,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class AnnotatedForFilter implements Filter<ClassInfo> {
 
   private final String targetSystem;
-  private final Map<String, Boolean> cache = new ConcurrentHashMap<>();
+  private final Map<CacheKey, Boolean> cache = new ConcurrentHashMap<>();
   private static final String ANNOTATED_FOR_DESC = AnnotatedFor.class.descriptorString();
 
   public AnnotatedForFilter(String targetSystem) {
@@ -39,7 +39,7 @@ public class AnnotatedForFilter implements Filter<ClassInfo> {
    */
   public boolean test(ClassModel model, ClassLoader loader) {
     String className = model.thisClass().asInternalName();
-    String cacheKey = cacheKey(className, loader);
+    CacheKey cacheKey = new CacheKey(className, loader);
 
     if (cache.containsKey(cacheKey)) {
       return cache.get(cacheKey);
@@ -58,7 +58,7 @@ public class AnnotatedForFilter implements Filter<ClassInfo> {
   public boolean test(ClassInfo info) {
     String className = info.internalName();
     if (className == null) return false;
-    String cacheKey = cacheKey(className, info.loader());
+    CacheKey cacheKey = new CacheKey(className, info.loader());
 
     if (cache.containsKey(cacheKey)) {
       return cache.get(cacheKey);
@@ -120,8 +120,29 @@ public class AnnotatedForFilter implements Filter<ClassInfo> {
         .orElse(false);
   }
 
-  private static String cacheKey(String className, ClassLoader loader) {
-    int loaderId = (loader == null) ? 0 : System.identityHashCode(loader);
-    return className + "#" + loaderId;
+  private static final class CacheKey {
+    private final String className;
+    private final ClassLoader loader;
+
+    private CacheKey(String className, ClassLoader loader) {
+      this.className = className;
+      this.loader = loader;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+      if (this == obj) {
+        return true;
+      }
+      if (!(obj instanceof CacheKey other)) {
+        return false;
+      }
+      return className.equals(other.className) && loader == other.loader;
+    }
+
+    @Override
+    public int hashCode() {
+      return 31 * className.hashCode() + System.identityHashCode(loader);
+    }
   }
 }
