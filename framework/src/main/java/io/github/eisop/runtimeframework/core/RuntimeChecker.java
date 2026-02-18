@@ -28,7 +28,8 @@ public abstract class RuntimeChecker {
    * @param policy The active runtime policy.
    * @return A configured InstrumentationStrategy.
    */
-  protected InstrumentationStrategy createStrategy(TypeSystemConfiguration config, RuntimePolicy policy) {
+  protected InstrumentationStrategy createStrategy(
+      TypeSystemConfiguration config, RuntimePolicy policy) {
     return new BoundaryStrategy(config, policy);
   }
 }
