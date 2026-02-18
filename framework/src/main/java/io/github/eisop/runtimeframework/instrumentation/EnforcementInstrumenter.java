@@ -1,8 +1,6 @@
 package io.github.eisop.runtimeframework.instrumentation;
 
 import io.github.eisop.runtimeframework.core.CheckGenerator;
-import io.github.eisop.runtimeframework.filter.ClassInfo;
-import io.github.eisop.runtimeframework.filter.Filter;
 import io.github.eisop.runtimeframework.resolution.HierarchyResolver;
 import io.github.eisop.runtimeframework.resolution.ParentMethod;
 import io.github.eisop.runtimeframework.strategy.InstrumentationStrategy;
@@ -23,10 +21,7 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
   private final HierarchyResolver hierarchyResolver;
 
   public EnforcementInstrumenter(
-      InstrumentationStrategy strategy,
-      HierarchyResolver hierarchyResolver,
-      Filter<ClassInfo> safetyFilter) {
-    super(safetyFilter);
+      InstrumentationStrategy strategy, HierarchyResolver hierarchyResolver) {
     this.strategy = strategy;
     this.hierarchyResolver = hierarchyResolver;
   }
