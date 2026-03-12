@@ -3,6 +3,7 @@ package io.github.eisop.runtimeframework.policy;
 import io.github.eisop.runtimeframework.filter.AnnotatedForFilter;
 import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.filter.Filter;
+import io.github.eisop.runtimeframework.planning.FlowEvent;
 import io.github.eisop.runtimeframework.resolution.ResolutionEnvironment;
 import java.lang.classfile.ClassModel;
 
@@ -81,11 +82,60 @@ public final class DefaultRuntimePolicy implements RuntimePolicy {
     return isGlobalMode;
   }
 
+  @Override
+  public boolean allows(FlowEvent event) {
+    return switch (event) {
+      case FlowEvent.MethodParameter ignored -> isCheckedEnclosingMethod(event);
+      case FlowEvent.MethodReturn ignored -> isCheckedEnclosingMethod(event);
+      case FlowEvent.BoundaryCallReturn boundaryCallReturn ->
+          isCheckedEnclosingMethod(event)
+              && isUncheckedTarget(boundaryCallReturn.target().ownerInternalName(), event);
+      case FlowEvent.FieldRead fieldRead ->
+          isCheckedEnclosingMethod(event)
+              && (isSameOwner(fieldRead.target().ownerInternalName(), event)
+                  || isUncheckedTarget(fieldRead.target().ownerInternalName(), event));
+      case FlowEvent.FieldWrite fieldWrite ->
+          isGlobalMode
+              && !isSameOwner(fieldWrite.target().ownerInternalName(), event)
+              && isCheckedTarget(fieldWrite.target().ownerInternalName(), event);
+      case FlowEvent.ArrayLoad ignored -> isCheckedEnclosingMethod(event);
+      case FlowEvent.ArrayStore ignored -> true;
+      case FlowEvent.LocalStore ignored -> isCheckedEnclosingMethod(event);
+      case FlowEvent.BridgeParameter ignored -> true;
+      case FlowEvent.BridgeReturn ignored -> true;
+      case FlowEvent.OverrideParameter ignored -> isGlobalMode && isUncheckedEnclosingMethod(event);
+      case FlowEvent.OverrideReturn ignored -> isGlobalMode && isUncheckedEnclosingMethod(event);
+      case FlowEvent.ConstructorEnter ignored -> false;
+      case FlowEvent.ConstructorCommit ignored -> false;
+      case FlowEvent.BoundaryReceiverUse ignored -> false;
+    };
+  }
+
   private boolean isExplicitlyChecked(ClassInfo info) {
     return checkedScopeFilter != null && checkedScopeFilter.test(info);
   }
 
   private boolean isAnnotatedForChecked(ClassInfo info) {
     return trustAnnotatedFor && annotatedForFilter != null && annotatedForFilter.test(info);
+  }
+
+  private boolean isCheckedEnclosingMethod(FlowEvent event) {
+    return event.methodContext().classContext().classification() == ClassClassification.CHECKED;
+  }
+
+  private boolean isUncheckedEnclosingMethod(FlowEvent event) {
+    return event.methodContext().classContext().classification() == ClassClassification.UNCHECKED;
+  }
+
+  private boolean isSameOwner(String ownerInternalName, FlowEvent event) {
+    return ownerInternalName.equals(event.methodContext().classContext().classInfo().internalName());
+  }
+
+  private boolean isCheckedTarget(String ownerInternalName, FlowEvent event) {
+    return isChecked(new ClassInfo(ownerInternalName, event.methodContext().classContext().classInfo().loader(), null));
+  }
+
+  private boolean isUncheckedTarget(String ownerInternalName, FlowEvent event) {
+    return !isCheckedTarget(ownerInternalName, event);
   }
 }

@@ -109,11 +109,12 @@ public final class SemanticsBackedEnforcementPlanner implements EnforcementPlann
       case FlowEvent.ArrayLoad arrayLoad -> planArrayLoad(arrayLoad, resolutionContext);
       case FlowEvent.ArrayStore arrayStore -> planArrayStore(arrayStore, resolutionContext);
       case FlowEvent.LocalStore localStore -> planLocalStore(localStore, resolutionContext);
+      case FlowEvent.OverrideParameter overrideParameter ->
+          planOverrideParameter(overrideParameter, resolutionContext);
       case FlowEvent.OverrideReturn overrideReturn ->
           planOverrideReturn(overrideReturn, resolutionContext);
       case FlowEvent.BridgeParameter ignored -> List.of();
       case FlowEvent.BridgeReturn ignored -> List.of();
-      case FlowEvent.OverrideParameter ignored -> List.of();
       case FlowEvent.ConstructorEnter ignored -> List.of();
       case FlowEvent.ConstructorCommit ignored -> List.of();
       case FlowEvent.BoundaryReceiverUse ignored -> List.of();
@@ -146,10 +147,6 @@ public final class SemanticsBackedEnforcementPlanner implements EnforcementPlann
 
   private List<InstrumentationAction> planBoundaryCallReturn(
       FlowEvent.BoundaryCallReturn event, ResolutionContext resolutionContext) {
-    if (isCheckedClass(event.target().ownerInternalName(), resolutionContext.loader())) {
-      return List.of();
-    }
-
     return planResolvedTarget(
         event.target(),
         resolutionContext,
@@ -161,12 +158,6 @@ public final class SemanticsBackedEnforcementPlanner implements EnforcementPlann
 
   private List<InstrumentationAction> planFieldRead(
       FlowEvent.FieldRead event, ResolutionContext resolutionContext) {
-    String currentOwner = currentOwnerInternalName(event.methodContext());
-    if (!event.target().ownerInternalName().equals(currentOwner)
-        && isCheckedClass(event.target().ownerInternalName(), resolutionContext.loader())) {
-      return List.of();
-    }
-
     return planResolvedTarget(
         event.target(),
         resolutionContext,
@@ -178,15 +169,6 @@ public final class SemanticsBackedEnforcementPlanner implements EnforcementPlann
 
   private List<InstrumentationAction> planFieldWrite(
       FlowEvent.FieldWrite event, ResolutionContext resolutionContext) {
-    String currentOwner = currentOwnerInternalName(event.methodContext());
-    if (event.target().ownerInternalName().equals(currentOwner)) {
-      return List.of();
-    }
-    if (!policy.isGlobalMode()
-        || !isCheckedClass(event.target().ownerInternalName(), resolutionContext.loader())) {
-      return List.of();
-    }
-
     String displayName =
         event.isStaticAccess()
             ? "Static Field '" + event.target().fieldName() + "'"
@@ -234,20 +216,43 @@ public final class SemanticsBackedEnforcementPlanner implements EnforcementPlann
         DiagnosticSpec.of("Local Variable Assignment (Slot " + event.target().slot() + ")"));
   }
 
-  private List<InstrumentationAction> planOverrideReturn(
-      FlowEvent.OverrideReturn event, ResolutionContext resolutionContext) {
-    if (!policy.isGlobalMode()) {
+  private List<InstrumentationAction> planOverrideParameter(
+      FlowEvent.OverrideParameter event, ResolutionContext resolutionContext) {
+    Optional<CheckedOverrideTarget> target =
+        findCheckedOverrideTarget(event.methodContext(), resolutionContext.loader());
+    if (target.isEmpty()) {
       return List.of();
     }
 
-    Optional<TargetRef.MethodReturn> target =
-        findCheckedOverrideReturnTarget(event.methodContext(), resolutionContext.loader());
+    TargetRef.MethodParameter parameterTarget =
+        new TargetRef.MethodParameter(
+            target.get().ownerInternalName(),
+            target.get().method(),
+            event.target().parameterIndex());
+    return planResolvedTarget(
+        parameterTarget,
+        resolutionContext,
+        InjectionPoint.methodEntry(),
+        new ValueAccess.LocalSlot(
+            parameterSlot(event.methodContext().methodModel(), event.target().parameterIndex())),
+        AttributionKind.CALLER,
+        DiagnosticSpec.of(
+            "Parameter "
+                + event.target().parameterIndex()
+                + " in overridden method "
+                + event.methodContext().methodModel().methodName().stringValue()));
+  }
+
+  private List<InstrumentationAction> planOverrideReturn(
+      FlowEvent.OverrideReturn event, ResolutionContext resolutionContext) {
+    Optional<CheckedOverrideTarget> target =
+        findCheckedOverrideTarget(event.methodContext(), resolutionContext.loader());
     if (target.isEmpty()) {
       return List.of();
     }
 
     return planResolvedTarget(
-        target.get(),
+        new TargetRef.MethodReturn(target.get().ownerInternalName(), target.get().method()),
         resolutionContext,
         InjectionPoint.normalReturn(event.location().bytecodeIndex()),
         new ValueAccess.OperandStack(0),
@@ -273,7 +278,7 @@ public final class SemanticsBackedEnforcementPlanner implements EnforcementPlann
             injectionPoint, valueAccess, contract, attribution, diagnostic));
   }
 
-  private Optional<TargetRef.MethodReturn> findCheckedOverrideReturnTarget(
+  private Optional<CheckedOverrideTarget> findCheckedOverrideTarget(
       MethodContext methodContext, ClassLoader loader) {
     ClassModel classModel = methodContext.classContext().classModel();
     Optional<ClassModel> parentModelOpt = resolutionEnvironment.loadSuperclass(classModel, loader);
@@ -287,7 +292,7 @@ public final class SemanticsBackedEnforcementPlanner implements EnforcementPlann
       if (policy.isChecked(new ClassInfo(ownerInternalName, loader, null), parentModel)) {
         for (MethodModel method : parentModel.methods()) {
           if (sameSignature(methodContext.methodModel(), method)) {
-            return Optional.of(new TargetRef.MethodReturn(ownerInternalName, method));
+            return Optional.of(new CheckedOverrideTarget(ownerInternalName, method));
           }
         }
       }
@@ -295,10 +300,6 @@ public final class SemanticsBackedEnforcementPlanner implements EnforcementPlann
       parentModelOpt = resolutionEnvironment.loadSuperclass(parentModel, loader);
     }
     return Optional.empty();
-  }
-
-  private boolean isCheckedClass(String ownerInternalName, ClassLoader loader) {
-    return policy.isChecked(new ClassInfo(ownerInternalName, loader, null));
   }
 
   private static boolean sameSignature(MethodModel left, MethodModel right) {
@@ -322,8 +323,5 @@ public final class SemanticsBackedEnforcementPlanner implements EnforcementPlann
         method.methodTypeSymbol().parameterList().get(parameterIndex).descriptorString();
     return descriptor.equals("J") || descriptor.equals("D") ? 2 : 1;
   }
-
-  private static String currentOwnerInternalName(MethodContext methodContext) {
-    return methodContext.classContext().classInfo().internalName();
-  }
+  private record CheckedOverrideTarget(String ownerInternalName, MethodModel method) {}
 }

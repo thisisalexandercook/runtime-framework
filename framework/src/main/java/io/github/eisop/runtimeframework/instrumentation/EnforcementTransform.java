@@ -60,7 +60,7 @@ public class EnforcementTransform implements CodeTransform {
             isCheckedScope ? ClassClassification.CHECKED : ClassClassification.UNCHECKED);
     this.methodContext = new MethodContext(classContext, methodModel);
     this.isCheckedScope = isCheckedScope;
-    this.entryChecksEmitted = !isCheckedScope;
+    this.entryChecksEmitted = false;
     this.currentInstructionIndex = 0;
     this.currentSourceLine = BytecodeLocation.UNKNOWN_LINE;
   }
@@ -224,11 +224,20 @@ public class EnforcementTransform implements CodeTransform {
     int paramCount = methodDesc.parameterList().size();
     List<FlowEvent> events = new ArrayList<>(paramCount);
     for (int i = 0; i < paramCount; i++) {
-      events.add(
-          new FlowEvent.MethodParameter(
-              methodContext,
-              BytecodeLocation.at(-1, currentSourceLine),
-              new TargetRef.MethodParameter(ownerInternalName(), methodModel, i)));
+      BytecodeLocation entryLocation = BytecodeLocation.at(-1, currentSourceLine);
+      if (isCheckedScope) {
+        events.add(
+            new FlowEvent.MethodParameter(
+                methodContext,
+                entryLocation,
+                new TargetRef.MethodParameter(ownerInternalName(), methodModel, i)));
+      } else {
+        events.add(
+            new FlowEvent.OverrideParameter(
+                methodContext,
+                entryLocation,
+                new TargetRef.MethodParameter(ownerInternalName(), methodModel, i)));
+      }
     }
     if (!events.isEmpty()) {
       emitActions(builder, planner.planMethod(methodContext, events), ActionTiming.METHOD_ENTRY, null);
