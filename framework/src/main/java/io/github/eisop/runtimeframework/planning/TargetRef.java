@@ -46,7 +46,7 @@ public sealed interface TargetRef
     }
   }
 
-  record ArrayComponent(String arrayDescriptor) implements TargetRef {
+  record ArrayComponent(String arrayDescriptor, TargetRef arrayTarget) implements TargetRef {
     public ArrayComponent {
       Objects.requireNonNull(arrayDescriptor, "arrayDescriptor");
     }

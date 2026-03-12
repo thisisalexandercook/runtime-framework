@@ -34,14 +34,13 @@ import java.util.List;
 /** A CodeTransform that injects runtime checks based on an {@link EnforcementPlanner}. */
 public class EnforcementTransform implements CodeTransform {
 
-  private static final String UNKNOWN_ARRAY_DESCRIPTOR = "[Ljava/lang/Object;";
-
   private final EnforcementPlanner planner;
   private final PropertyEmitter propertyEmitter;
   private final MethodContext methodContext;
   private final boolean isCheckedScope;
+  private final ReferenceValueTracker valueTracker;
   private boolean entryChecksEmitted;
-  private int currentInstructionIndex;
+  private int currentBytecodeOffset;
   private int currentSourceLine;
 
   public EnforcementTransform(
@@ -60,8 +59,9 @@ public class EnforcementTransform implements CodeTransform {
             isCheckedScope ? ClassClassification.CHECKED : ClassClassification.UNCHECKED);
     this.methodContext = new MethodContext(classContext, methodModel);
     this.isCheckedScope = isCheckedScope;
+    this.valueTracker = new ReferenceValueTracker(ownerInternalName(), methodModel);
     this.entryChecksEmitted = false;
-    this.currentInstructionIndex = 0;
+    this.currentBytecodeOffset = 0;
     this.currentSourceLine = BytecodeLocation.UNKNOWN_LINE;
   }
 
@@ -71,7 +71,15 @@ public class EnforcementTransform implements CodeTransform {
       currentSourceLine = lineNumber.line();
     }
 
+    if (element instanceof Instruction) {
+      valueTracker.enterBytecode(currentBytecodeOffset);
+    }
+
     if (maybeEmitEntryChecks(builder, element)) {
+      if (element instanceof Instruction instruction) {
+        valueTracker.acceptInstruction(instruction);
+        currentBytecodeOffset += instruction.sizeInBytes();
+      }
       return;
     }
 
@@ -85,8 +93,9 @@ public class EnforcementTransform implements CodeTransform {
       default -> builder.with(element);
     }
 
-    if (element instanceof Instruction) {
-      currentInstructionIndex++;
+    if (element instanceof Instruction instruction) {
+      valueTracker.acceptInstruction(instruction);
+      currentBytecodeOffset += instruction.sizeInBytes();
     }
   }
 
@@ -181,7 +190,9 @@ public class EnforcementTransform implements CodeTransform {
           new FlowEvent.ArrayStore(
               methodContext,
               location,
-              new TargetRef.ArrayComponent(UNKNOWN_ARRAY_DESCRIPTOR));
+              valueTracker
+                  .arrayComponentTarget(2)
+                  .orElseGet(() -> new TargetRef.ArrayComponent("[Ljava/lang/Object;", null)));
       emitPlannedActions(b, event, ActionTiming.BEFORE_INSTRUCTION);
     }
     b.with(a);
@@ -194,7 +205,9 @@ public class EnforcementTransform implements CodeTransform {
           new FlowEvent.ArrayLoad(
               methodContext,
               location,
-              new TargetRef.ArrayComponent(UNKNOWN_ARRAY_DESCRIPTOR));
+              valueTracker
+                  .arrayComponentTarget(1)
+                  .orElseGet(() -> new TargetRef.ArrayComponent("[Ljava/lang/Object;", null)));
       emitPlannedActions(b, event, ActionTiming.AFTER_INSTRUCTION);
     }
   }
@@ -211,7 +224,10 @@ public class EnforcementTransform implements CodeTransform {
             new FlowEvent.LocalStore(
                 methodContext,
                 location,
-                new TargetRef.Local(methodContext.methodModel(), s.slot(), location.bytecodeIndex()));
+                new TargetRef.Local(
+                    methodContext.methodModel(),
+                    s.slot(),
+                    location.bytecodeIndex() + s.sizeInBytes()));
         emitPlannedActions(b, event, ActionTiming.BEFORE_INSTRUCTION);
       }
     }
@@ -367,7 +383,7 @@ public class EnforcementTransform implements CodeTransform {
   }
 
   private BytecodeLocation currentLocation() {
-    return BytecodeLocation.at(currentInstructionIndex, currentSourceLine);
+    return BytecodeLocation.at(currentBytecodeOffset, currentSourceLine);
   }
 
   private String ownerInternalName() {

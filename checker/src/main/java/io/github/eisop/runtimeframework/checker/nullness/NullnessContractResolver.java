@@ -33,7 +33,7 @@ public final class NullnessContractResolver implements ContractResolver {
       case TargetRef.MethodReturn methodReturn -> resolveMethodReturn(methodReturn);
       case TargetRef.InvokedMethod invokedMethod -> resolveInvokedMethod(invokedMethod, context);
       case TargetRef.Field field -> resolveField(field, context);
-      case TargetRef.ArrayComponent arrayComponent -> resolveArrayComponent(arrayComponent);
+      case TargetRef.ArrayComponent arrayComponent -> resolveArrayComponent(arrayComponent, context);
       case TargetRef.Local local -> resolveLocal(local, context);
       case TargetRef.Receiver receiver -> NON_NULL_CONTRACT;
     };
@@ -41,27 +41,169 @@ public final class NullnessContractResolver implements ContractResolver {
 
   private ValueContract resolveMethodParameter(TargetRef.MethodParameter target) {
     MethodTypeDesc descriptor = target.method().methodTypeSymbol();
-    if (!isReferenceDescriptor(
-        descriptor.parameterList().get(target.parameterIndex()).descriptorString())) {
+    String parameterDescriptor = descriptor.parameterList().get(target.parameterIndex()).descriptorString();
+    if (!isReferenceDescriptor(parameterDescriptor)) {
       return ValueContract.none();
     }
-    return resolveAnnotations(
-        getMethodParameterAnnotations(target.method(), target.parameterIndex()), true);
+    AnnotatedTypeUse typeUse = methodParameterTypeUse(target.method(), target.parameterIndex());
+    return resolveAnnotations(typeUse.rootAnnotations(), true);
   }
 
   private ValueContract resolveMethodReturn(TargetRef.MethodReturn target) {
-    if (!isReferenceDescriptor(target.method().methodTypeSymbol().returnType().descriptorString())) {
+    String descriptor = target.method().methodTypeSymbol().returnType().descriptorString();
+    if (!isReferenceDescriptor(descriptor)) {
       return ValueContract.none();
     }
-    return resolveAnnotations(getMethodReturnAnnotations(target.method()), true);
+    return resolveAnnotations(methodReturnTypeUse(target.method()).rootAnnotations(), true);
   }
 
   private ValueContract resolveInvokedMethod(
       TargetRef.InvokedMethod target, ResolutionContext context) {
-    if (!isReferenceDescriptor(target.descriptor().returnType().descriptorString())) {
+    String returnDescriptor = target.descriptor().returnType().descriptorString();
+    if (!isReferenceDescriptor(returnDescriptor)) {
       return ValueContract.none();
     }
 
+    return resolveAnnotations(
+        context
+            .resolutionEnvironment()
+            .findDeclaredMethod(
+                target.ownerInternalName(),
+                target.methodName(),
+                target.descriptor().descriptorString(),
+                context.loader())
+            .map(method -> methodReturnTypeUse(method).rootAnnotations())
+            .orElse(List.of()),
+        true);
+  }
+
+  private ValueContract resolveField(TargetRef.Field target, ResolutionContext context) {
+    if (!isReferenceDescriptor(target.descriptor())) {
+      return ValueContract.none();
+    }
+
+    return resolveAnnotations(
+        context
+            .resolutionEnvironment()
+            .findDeclaredField(target.ownerInternalName(), target.fieldName(), context.loader())
+            .map(field -> fieldTypeUse(field).rootAnnotations())
+            .orElse(List.of()),
+        true);
+  }
+
+  private ValueContract resolveArrayComponent(
+      TargetRef.ArrayComponent target, ResolutionContext context) {
+    if (!isReferenceArrayComponent(target.arrayDescriptor())) {
+      return ValueContract.none();
+    }
+
+    AnnotatedTypeUse componentType = arrayComponentTypeUse(target, context);
+    if (componentType == null) {
+      return NON_NULL_CONTRACT;
+    }
+    return resolveAnnotations(componentType.rootAnnotations(), true);
+  }
+
+  private ValueContract resolveLocal(TargetRef.Local target, ResolutionContext context) {
+    AnnotatedTypeUse typeUse = localTypeUse(target, null, context);
+    return resolveAnnotations(typeUse.rootAnnotations(), true);
+  }
+
+  private AnnotatedTypeUse arrayComponentTypeUse(
+      TargetRef.ArrayComponent target, ResolutionContext context) {
+    AnnotatedTypeUse parentType = arraySourceTypeUse(target.arrayTarget(), target.arrayDescriptor(), context);
+    if (parentType == null || !target.arrayDescriptor().startsWith("[")) {
+      return null;
+    }
+
+    String componentDescriptor = target.arrayDescriptor().substring(1);
+    List<Annotation> rootAnnotations = new ArrayList<>();
+    List<TypeUseAnnotation> remainingTypeAnnotations = new ArrayList<>();
+    for (TypeUseAnnotation typeAnnotation : parentType.typeAnnotations()) {
+      if (!startsWithArrayStep(typeAnnotation.targetPath())) {
+        continue;
+      }
+      List<TypeAnnotation.TypePathComponent> remainingPath =
+          typeAnnotation.targetPath().subList(1, typeAnnotation.targetPath().size());
+      if (remainingPath.isEmpty()) {
+        rootAnnotations.add(typeAnnotation.annotation());
+      }
+      remainingTypeAnnotations.add(
+          new TypeUseAnnotation(typeAnnotation.annotation(), List.copyOf(remainingPath)));
+    }
+    return new AnnotatedTypeUse(componentDescriptor, List.copyOf(rootAnnotations), List.copyOf(remainingTypeAnnotations));
+  }
+
+  private AnnotatedTypeUse arraySourceTypeUse(
+      TargetRef sourceTarget, String descriptorHint, ResolutionContext context) {
+    if (sourceTarget == null) {
+      return new AnnotatedTypeUse(descriptorHint, List.of(), List.of());
+    }
+
+    return switch (sourceTarget) {
+      case TargetRef.MethodParameter methodParameter ->
+          methodParameterTypeUse(methodParameter.method(), methodParameter.parameterIndex());
+      case TargetRef.MethodReturn methodReturn -> methodReturnTypeUse(methodReturn.method());
+      case TargetRef.InvokedMethod invokedMethod -> invokedMethodTypeUse(invokedMethod, context);
+      case TargetRef.Field field -> fieldTypeUse(field, context);
+      case TargetRef.ArrayComponent arrayComponent -> arrayComponentTypeUse(arrayComponent, context);
+      case TargetRef.Local local -> localTypeUse(local, descriptorHint, context);
+      case TargetRef.Receiver receiver -> new AnnotatedTypeUse("L" + receiver.ownerInternalName() + ";", List.of(), List.of());
+    };
+  }
+
+  private AnnotatedTypeUse methodParameterTypeUse(MethodModel method, int parameterIndex) {
+    String descriptor = method.methodTypeSymbol().parameterList().get(parameterIndex).descriptorString();
+    List<Annotation> rootAnnotations = new ArrayList<>();
+    List<TypeUseAnnotation> typeAnnotations = new ArrayList<>();
+
+    method
+        .findAttribute(Attributes.runtimeVisibleParameterAnnotations())
+        .ifPresent(
+            attr -> {
+              List<List<Annotation>> all = attr.parameterAnnotations();
+              if (parameterIndex < all.size()) {
+                rootAnnotations.addAll(all.get(parameterIndex));
+              }
+            });
+    method
+        .findAttribute(Attributes.runtimeVisibleTypeAnnotations())
+        .ifPresent(
+            attr -> {
+              for (TypeAnnotation typeAnnotation : attr.annotations()) {
+                if (typeAnnotation.targetInfo() instanceof TypeAnnotation.FormalParameterTarget target
+                    && target.formalParameterIndex() == parameterIndex) {
+                  addTypeAnnotation(rootAnnotations, typeAnnotations, typeAnnotation);
+                }
+              }
+            });
+    return new AnnotatedTypeUse(descriptor, List.copyOf(rootAnnotations), List.copyOf(typeAnnotations));
+  }
+
+  private AnnotatedTypeUse methodReturnTypeUse(MethodModel method) {
+    String descriptor = method.methodTypeSymbol().returnType().descriptorString();
+    List<Annotation> rootAnnotations = new ArrayList<>();
+    List<TypeUseAnnotation> typeAnnotations = new ArrayList<>();
+
+    method
+        .findAttribute(Attributes.runtimeVisibleAnnotations())
+        .ifPresent(attr -> rootAnnotations.addAll(attr.annotations()));
+    method
+        .findAttribute(Attributes.runtimeVisibleTypeAnnotations())
+        .ifPresent(
+            attr -> {
+              for (TypeAnnotation typeAnnotation : attr.annotations()) {
+                if (typeAnnotation.targetInfo().targetType() == TypeAnnotation.TargetType.METHOD_RETURN) {
+                  addTypeAnnotation(rootAnnotations, typeAnnotations, typeAnnotation);
+                }
+              }
+            });
+    return new AnnotatedTypeUse(descriptor, List.copyOf(rootAnnotations), List.copyOf(typeAnnotations));
+  }
+
+  private AnnotatedTypeUse invokedMethodTypeUse(
+      TargetRef.InvokedMethod target, ResolutionContext context) {
+    String descriptor = target.descriptor().returnType().descriptorString();
     return context
         .resolutionEnvironment()
         .findDeclaredMethod(
@@ -69,37 +211,75 @@ public final class NullnessContractResolver implements ContractResolver {
             target.methodName(),
             target.descriptor().descriptorString(),
             context.loader())
-        .map(method -> resolveAnnotations(getMethodReturnAnnotations(method), true))
-        .orElse(NON_NULL_CONTRACT);
+        .map(this::methodReturnTypeUse)
+        .orElse(new AnnotatedTypeUse(descriptor, List.of(), List.of()));
   }
 
-  private ValueContract resolveField(TargetRef.Field target, ResolutionContext context) {
-    boolean isReference = isReferenceDescriptor(target.descriptor());
-    if (!isReference) {
-      return ValueContract.none();
-    }
-
+  private AnnotatedTypeUse fieldTypeUse(TargetRef.Field target, ResolutionContext context) {
     return context
         .resolutionEnvironment()
         .findDeclaredField(target.ownerInternalName(), target.fieldName(), context.loader())
-        .map(field -> resolveAnnotations(getFieldAnnotations(field), true))
-        .orElse(NON_NULL_CONTRACT);
+        .map(this::fieldTypeUse)
+        .orElse(new AnnotatedTypeUse(target.descriptor(), List.of(), List.of()));
   }
 
-  private ValueContract resolveArrayComponent(TargetRef.ArrayComponent target) {
-    return isReferenceArrayComponent(target.arrayDescriptor())
-        ? NON_NULL_CONTRACT
-        : ValueContract.none();
+  private AnnotatedTypeUse fieldTypeUse(FieldModel field) {
+    String descriptor = field.fieldType().stringValue();
+    List<Annotation> rootAnnotations = new ArrayList<>();
+    List<TypeUseAnnotation> typeAnnotations = new ArrayList<>();
+
+    field
+        .findAttribute(Attributes.runtimeVisibleAnnotations())
+        .ifPresent(attr -> rootAnnotations.addAll(attr.annotations()));
+    field
+        .findAttribute(Attributes.runtimeVisibleTypeAnnotations())
+        .ifPresent(
+            attr -> {
+              for (TypeAnnotation typeAnnotation : attr.annotations()) {
+                if (typeAnnotation.targetInfo().targetType() == TypeAnnotation.TargetType.FIELD) {
+                  addTypeAnnotation(rootAnnotations, typeAnnotations, typeAnnotation);
+                }
+              }
+            });
+    return new AnnotatedTypeUse(descriptor, List.copyOf(rootAnnotations), List.copyOf(typeAnnotations));
   }
 
-  private ValueContract resolveLocal(TargetRef.Local target, ResolutionContext context) {
-    List<Annotation> annotations = new ArrayList<>();
-    ResolutionEnvironment resolutionEnvironment = context.resolutionEnvironment();
+  private AnnotatedTypeUse localTypeUse(
+      TargetRef.Local target, String descriptorHint, ResolutionContext context) {
+    List<Annotation> rootAnnotations = new ArrayList<>();
+    List<TypeUseAnnotation> typeAnnotations = new ArrayList<>();
     for (ResolutionEnvironment.LocalVariableTypeAnnotation localAnnotation :
-        resolutionEnvironment.getLocalVariableTypeAnnotations(target.method(), target.slot())) {
-      annotations.add(localAnnotation.annotation());
+        context
+            .resolutionEnvironment()
+            .localsAt(target.method(), target.bytecodeIndex(), target.slot())) {
+      addTypeAnnotation(rootAnnotations, typeAnnotations, localAnnotation);
     }
-    return resolveAnnotations(annotations, true);
+    return new AnnotatedTypeUse(
+        descriptorHint != null ? descriptorHint : "Ljava/lang/Object;",
+        List.copyOf(rootAnnotations),
+        List.copyOf(typeAnnotations));
+  }
+
+  private void addTypeAnnotation(
+      List<Annotation> rootAnnotations,
+      List<TypeUseAnnotation> typeAnnotations,
+      TypeAnnotation typeAnnotation) {
+    List<TypeAnnotation.TypePathComponent> targetPath = List.copyOf(typeAnnotation.targetPath());
+    if (targetPath.isEmpty()) {
+      rootAnnotations.add(typeAnnotation.annotation());
+    }
+    typeAnnotations.add(new TypeUseAnnotation(typeAnnotation.annotation(), targetPath));
+  }
+
+  private void addTypeAnnotation(
+      List<Annotation> rootAnnotations,
+      List<TypeUseAnnotation> typeAnnotations,
+      ResolutionEnvironment.LocalVariableTypeAnnotation localAnnotation) {
+    List<TypeAnnotation.TypePathComponent> targetPath = List.copyOf(localAnnotation.targetPath());
+    if (targetPath.isEmpty()) {
+      rootAnnotations.add(localAnnotation.annotation());
+    }
+    typeAnnotations.add(new TypeUseAnnotation(localAnnotation.annotation(), targetPath));
   }
 
   private ValueContract resolveAnnotations(List<Annotation> annotations, boolean isReference) {
@@ -118,67 +298,6 @@ public final class NullnessContractResolver implements ContractResolver {
     return NON_NULL_CONTRACT;
   }
 
-  private List<Annotation> getMethodParameterAnnotations(MethodModel method, int parameterIndex) {
-    List<Annotation> annotations = new ArrayList<>();
-    method
-        .findAttribute(Attributes.runtimeVisibleParameterAnnotations())
-        .ifPresent(
-            attr -> {
-              List<List<Annotation>> all = attr.parameterAnnotations();
-              if (parameterIndex < all.size()) {
-                annotations.addAll(all.get(parameterIndex));
-              }
-            });
-    method
-        .findAttribute(Attributes.runtimeVisibleTypeAnnotations())
-        .ifPresent(
-            attr -> {
-              for (TypeAnnotation annotation : attr.annotations()) {
-                if (annotation.targetInfo() instanceof TypeAnnotation.FormalParameterTarget target
-                    && target.formalParameterIndex() == parameterIndex) {
-                  annotations.add(annotation.annotation());
-                }
-              }
-            });
-    return annotations;
-  }
-
-  private List<Annotation> getMethodReturnAnnotations(MethodModel method) {
-    List<Annotation> annotations = new ArrayList<>();
-    method
-        .findAttribute(Attributes.runtimeVisibleAnnotations())
-        .ifPresent(attr -> annotations.addAll(attr.annotations()));
-    method
-        .findAttribute(Attributes.runtimeVisibleTypeAnnotations())
-        .ifPresent(
-            attr -> {
-              for (TypeAnnotation annotation : attr.annotations()) {
-                if (annotation.targetInfo().targetType() == TypeAnnotation.TargetType.METHOD_RETURN) {
-                  annotations.add(annotation.annotation());
-                }
-              }
-            });
-    return annotations;
-  }
-
-  private List<Annotation> getFieldAnnotations(FieldModel field) {
-    List<Annotation> annotations = new ArrayList<>();
-    field
-        .findAttribute(Attributes.runtimeVisibleAnnotations())
-        .ifPresent(attr -> annotations.addAll(attr.annotations()));
-    field
-        .findAttribute(Attributes.runtimeVisibleTypeAnnotations())
-        .ifPresent(
-            attr -> {
-              for (TypeAnnotation annotation : attr.annotations()) {
-                if (annotation.targetInfo().targetType() == TypeAnnotation.TargetType.FIELD) {
-                  annotations.add(annotation.annotation());
-                }
-              }
-            });
-    return annotations;
-  }
-
   private boolean isReferenceDescriptor(String descriptor) {
     return descriptor.startsWith("L") || descriptor.startsWith("[");
   }
@@ -186,4 +305,17 @@ public final class NullnessContractResolver implements ContractResolver {
   private boolean isReferenceArrayComponent(String arrayDescriptor) {
     return arrayDescriptor.startsWith("[L") || arrayDescriptor.startsWith("[[");
   }
+
+  private boolean startsWithArrayStep(List<TypeAnnotation.TypePathComponent> targetPath) {
+    return !targetPath.isEmpty()
+        && targetPath.get(0).typePathKind() == TypeAnnotation.TypePathComponent.Kind.ARRAY;
+  }
+
+  private record AnnotatedTypeUse(
+      String descriptor,
+      List<Annotation> rootAnnotations,
+      List<TypeUseAnnotation> typeAnnotations) {}
+
+  private record TypeUseAnnotation(
+      Annotation annotation, List<TypeAnnotation.TypePathComponent> targetPath) {}
 }

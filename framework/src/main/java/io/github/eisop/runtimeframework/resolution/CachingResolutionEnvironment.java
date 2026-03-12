@@ -46,7 +46,7 @@ final class CachingResolutionEnvironment implements ResolutionEnvironment {
                                 if (info.index() == slot) {
                                   result.add(
                                       new LocalVariableTypeAnnotation(
-                                          typeAnnotation.annotation(),
+                                          typeAnnotation,
                                           info.startLabel(),
                                           info.endLabel(),
                                           slot));

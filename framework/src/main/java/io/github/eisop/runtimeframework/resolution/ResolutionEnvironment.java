@@ -1,10 +1,10 @@
 package io.github.eisop.runtimeframework.resolution;
 
-import java.lang.classfile.Annotation;
 import java.lang.classfile.ClassModel;
 import java.lang.classfile.FieldModel;
 import java.lang.classfile.Label;
 import java.lang.classfile.MethodModel;
+import java.lang.classfile.TypeAnnotation;
 import java.util.List;
 import java.util.Optional;
 
@@ -58,12 +58,45 @@ public interface ResolutionEnvironment {
    */
   List<LocalVariableTypeAnnotation> getLocalVariableTypeAnnotations(MethodModel method, int slot);
 
+  default List<LocalVariableTypeAnnotation> localsAt(
+      MethodModel method, int bytecodeOffset, int slot) {
+    return getLocalVariableTypeAnnotations(method, slot).stream()
+        .filter(binding -> binding.contains(bytecodeOffset, method))
+        .toList();
+  }
+
   static ResolutionEnvironment system() {
     return Holder.INSTANCE;
   }
 
   record LocalVariableTypeAnnotation(
-      Annotation annotation, Label startLabel, Label endLabel, int slot) {}
+      TypeAnnotation typeAnnotation, Label startLabel, Label endLabel, int slot) {
+
+    public java.lang.classfile.Annotation annotation() {
+      return typeAnnotation.annotation();
+    }
+
+    public List<TypeAnnotation.TypePathComponent> targetPath() {
+      return typeAnnotation.targetPath();
+    }
+
+    public boolean contains(int bytecodeOffset, MethodModel method) {
+      if (bytecodeOffset < 0) {
+        return true;
+      }
+      return method
+          .code()
+          .filter(java.lang.classfile.attribute.CodeAttribute.class::isInstance)
+          .map(java.lang.classfile.attribute.CodeAttribute.class::cast)
+          .map(
+              codeAttribute -> {
+                int startOffset = codeAttribute.labelToBci(startLabel);
+                int endOffset = codeAttribute.labelToBci(endLabel);
+                return startOffset <= bytecodeOffset && bytecodeOffset < endOffset;
+              })
+          .orElse(false);
+    }
+  }
 
   final class Holder {
     private static final ResolutionEnvironment INSTANCE = new CachingResolutionEnvironment();
