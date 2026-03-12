@@ -2,6 +2,7 @@ package io.github.eisop.runtimeframework.core;
 
 import io.github.eisop.runtimeframework.instrumentation.RuntimeInstrumenter;
 import io.github.eisop.runtimeframework.policy.RuntimePolicy;
+import io.github.eisop.runtimeframework.resolution.ResolutionEnvironment;
 import io.github.eisop.runtimeframework.strategy.BoundaryStrategy;
 import io.github.eisop.runtimeframework.strategy.InstrumentationStrategy;
 
@@ -30,6 +31,13 @@ public abstract class RuntimeChecker {
    */
   protected InstrumentationStrategy createStrategy(
       TypeSystemConfiguration config, RuntimePolicy policy) {
-    return new BoundaryStrategy(config, policy);
+    return createStrategy(config, policy, ResolutionEnvironment.system());
+  }
+
+  protected InstrumentationStrategy createStrategy(
+      TypeSystemConfiguration config,
+      RuntimePolicy policy,
+      ResolutionEnvironment resolutionEnvironment) {
+    return new BoundaryStrategy(config, policy, resolutionEnvironment);
   }
 }

@@ -8,6 +8,7 @@ import io.github.eisop.runtimeframework.instrumentation.RuntimeInstrumenter;
 import io.github.eisop.runtimeframework.policy.RuntimePolicy;
 import io.github.eisop.runtimeframework.resolution.BytecodeHierarchyResolver;
 import io.github.eisop.runtimeframework.resolution.HierarchyResolver;
+import io.github.eisop.runtimeframework.resolution.ResolutionEnvironment;
 import io.github.eisop.runtimeframework.strategy.InstrumentationStrategy;
 import org.checkerframework.checker.nullness.qual.NonNull;
 import org.checkerframework.checker.nullness.qual.Nullable;
@@ -21,6 +22,7 @@ public class NullnessRuntimeChecker extends RuntimeChecker {
 
   @Override
   public RuntimeInstrumenter getInstrumenter(RuntimePolicy policy) {
+    ResolutionEnvironment resolutionEnvironment = ResolutionEnvironment.system();
     NullnessCheckGenerator verifier = new NullnessCheckGenerator();
 
     TypeSystemConfiguration config =
@@ -29,9 +31,10 @@ public class NullnessRuntimeChecker extends RuntimeChecker {
             .onNoop(Nullable.class)
             .withDefault(ValidationKind.ENFORCE, verifier);
 
-    InstrumentationStrategy strategy = createStrategy(config, policy);
+    InstrumentationStrategy strategy = createStrategy(config, policy, resolutionEnvironment);
 
-    HierarchyResolver resolver = new BytecodeHierarchyResolver(info -> policy.isChecked(info));
+    HierarchyResolver resolver =
+        new BytecodeHierarchyResolver(info -> policy.isChecked(info), resolutionEnvironment);
 
     return new EnforcementInstrumenter(strategy, resolver);
   }

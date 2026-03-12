@@ -6,12 +6,10 @@ import io.github.eisop.runtimeframework.core.ValidationKind;
 import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.policy.RuntimePolicy;
 import io.github.eisop.runtimeframework.resolution.ParentMethod;
+import io.github.eisop.runtimeframework.resolution.ResolutionEnvironment;
 import io.github.eisop.runtimeframework.runtime.AttributionKind;
-import java.io.IOException;
-import java.io.InputStream;
 import java.lang.classfile.Annotation;
 import java.lang.classfile.Attributes;
-import java.lang.classfile.ClassFile;
 import java.lang.classfile.ClassModel;
 import java.lang.classfile.FieldModel;
 import java.lang.classfile.MethodModel;
@@ -25,10 +23,19 @@ public class BoundaryStrategy implements InstrumentationStrategy {
 
   protected final TypeSystemConfiguration configuration;
   protected final RuntimePolicy policy;
+  protected final ResolutionEnvironment resolutionEnvironment;
 
   public BoundaryStrategy(TypeSystemConfiguration configuration, RuntimePolicy policy) {
+    this(configuration, policy, ResolutionEnvironment.system());
+  }
+
+  public BoundaryStrategy(
+      TypeSystemConfiguration configuration,
+      RuntimePolicy policy,
+      ResolutionEnvironment resolutionEnvironment) {
     this.configuration = configuration;
     this.policy = policy;
+    this.resolutionEnvironment = resolutionEnvironment;
   }
 
   protected CheckGenerator resolveGenerator(List<Annotation> annotations) {
@@ -278,13 +285,13 @@ public class BoundaryStrategy implements InstrumentationStrategy {
       return null;
     }
 
-    String superName = classModel.superclass().map(sc -> sc.asInternalName()).orElse(null);
-    if (superName == null || superName.equals("java/lang/Object")) return null;
-
     try {
-      ClassModel parentModel = loadClassModel(superName, loader);
-      while (parentModel != null
-          && !parentModel.thisClass().asInternalName().equals("java/lang/Object")) {
+      var parentModelOpt = resolutionEnvironment.loadSuperclass(classModel, loader);
+      while (parentModelOpt.isPresent()) {
+        ClassModel parentModel = parentModelOpt.get();
+        if (parentModel.thisClass().asInternalName().equals("java/lang/Object")) {
+          return null;
+        }
 
         if (policy.isChecked(
             new ClassInfo(parentModel.thisClass().asInternalName(), loader, null), parentModel)) {
@@ -310,9 +317,7 @@ public class BoundaryStrategy implements InstrumentationStrategy {
           }
         }
 
-        String nextSuper = parentModel.superclass().map(sc -> sc.asInternalName()).orElse(null);
-        if (nextSuper == null) break;
-        parentModel = loadClassModel(nextSuper, loader);
+        parentModelOpt = resolutionEnvironment.loadSuperclass(parentModel, loader);
       }
     } catch (Throwable e) {
       System.out.println("bytecode parsing fail in method override: " + e.getMessage());
@@ -388,24 +393,10 @@ public class BoundaryStrategy implements InstrumentationStrategy {
 
   protected List<Annotation> getLocalVariableAnnotations(MethodModel method, int slot) {
     List<Annotation> result = new ArrayList<>();
-    method
-        .code()
-        .ifPresent(
-            code -> {
-              code.findAttribute(Attributes.runtimeVisibleTypeAnnotations())
-                  .ifPresent(
-                      attr -> {
-                        for (TypeAnnotation ta : attr.annotations()) {
-                          if (ta.targetInfo() instanceof TypeAnnotation.LocalVarTarget localVar) {
-                            for (TypeAnnotation.LocalVarTargetInfo info : localVar.table()) {
-                              if (info.index() == slot) {
-                                result.add(ta.annotation());
-                              }
-                            }
-                          }
-                        }
-                      });
-            });
+    for (ResolutionEnvironment.LocalVariableTypeAnnotation localAnnotation :
+        resolutionEnvironment.getLocalVariableTypeAnnotations(method, slot)) {
+      result.add(localAnnotation.annotation());
+    }
     return result;
   }
 
@@ -415,31 +406,14 @@ public class BoundaryStrategy implements InstrumentationStrategy {
 
   private boolean isFieldOptOut(String owner, String fieldName, ClassLoader loader) {
     try {
-      ClassModel model = loadClassModel(owner, loader);
-      if (model == null) return false;
-
-      for (FieldModel field : model.fields()) {
-        if (field.fieldName().stringValue().equals(fieldName)) {
-          if (hasNoopAnnotation(getFieldAnnotations(field))) return true;
-        }
-      }
+      return resolutionEnvironment
+          .findDeclaredField(owner, fieldName, loader)
+          .map(field -> hasNoopAnnotation(getFieldAnnotations(field)))
+          .orElse(false);
     } catch (Throwable t) {
       System.out.println("bytecode fail in is field opt out");
     }
     return false;
-  }
-
-  private ClassModel loadClassModel(String internalName, ClassLoader loader) {
-    String resource = internalName + ".class";
-    try (InputStream is =
-        (loader != null)
-            ? loader.getResourceAsStream(resource)
-            : ClassLoader.getSystemResourceAsStream(resource)) {
-      if (is == null) return null;
-      return ClassFile.of().parse(is.readAllBytes());
-    } catch (IOException e) {
-      return null;
-    }
   }
 
   private boolean hasNoopAnnotation(List<Annotation> annotations) {

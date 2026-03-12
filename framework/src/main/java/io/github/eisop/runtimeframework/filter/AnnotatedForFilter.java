@@ -1,12 +1,10 @@
 package io.github.eisop.runtimeframework.filter;
 
 import io.github.eisop.runtimeframework.qual.AnnotatedFor;
-import java.io.IOException;
-import java.io.InputStream;
+import io.github.eisop.runtimeframework.resolution.ResolutionEnvironment;
 import java.lang.classfile.Annotation;
 import java.lang.classfile.AnnotationValue;
 import java.lang.classfile.Attributes;
-import java.lang.classfile.ClassFile;
 import java.lang.classfile.ClassModel;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -22,11 +20,17 @@ import java.util.concurrent.ConcurrentHashMap;
 public class AnnotatedForFilter implements Filter<ClassInfo> {
 
   private final String targetSystem;
+  private final ResolutionEnvironment resolutionEnvironment;
   private final Map<CacheKey, Boolean> cache = new ConcurrentHashMap<>();
   private static final String ANNOTATED_FOR_DESC = AnnotatedFor.class.descriptorString();
 
   public AnnotatedForFilter(String targetSystem) {
+    this(targetSystem, ResolutionEnvironment.system());
+  }
+
+  public AnnotatedForFilter(String targetSystem, ResolutionEnvironment resolutionEnvironment) {
     this.targetSystem = targetSystem;
+    this.resolutionEnvironment = resolutionEnvironment;
   }
 
   /**
@@ -64,21 +68,11 @@ public class AnnotatedForFilter implements Filter<ClassInfo> {
       return cache.get(cacheKey);
     }
 
-    boolean result = false;
-    String resourcePath = className + ".class";
-
-    try (InputStream is =
-        (info.loader() != null)
-            ? info.loader().getResourceAsStream(resourcePath)
-            : ClassLoader.getSystemResourceAsStream(resourcePath)) {
-
-      if (is != null) {
-        ClassModel model = ClassFile.of().parse(is.readAllBytes());
-        result = test(model, info.loader());
-      }
-    } catch (IOException e) {
-      System.err.println("[AnnotatedForFilter] Failed to load bytecode for: " + className);
-    }
+    boolean result =
+        resolutionEnvironment
+            .loadClass(className, info.loader())
+            .map(model -> test(model, info.loader()))
+            .orElse(false);
 
     cache.put(cacheKey, result);
     return result;

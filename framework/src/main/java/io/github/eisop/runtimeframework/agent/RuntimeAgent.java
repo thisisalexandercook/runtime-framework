@@ -7,6 +7,7 @@ import io.github.eisop.runtimeframework.filter.Filter;
 import io.github.eisop.runtimeframework.filter.FrameworkSafetyFilter;
 import io.github.eisop.runtimeframework.policy.DefaultRuntimePolicy;
 import io.github.eisop.runtimeframework.policy.RuntimePolicy;
+import io.github.eisop.runtimeframework.resolution.ResolutionEnvironment;
 import io.github.eisop.runtimeframework.runtime.RuntimeVerifier;
 import io.github.eisop.runtimeframework.runtime.ViolationHandler;
 import java.lang.instrument.Instrumentation;
@@ -59,7 +60,12 @@ public final class RuntimeAgent {
 
     RuntimePolicy policy =
         new DefaultRuntimePolicy(
-            safeFilter, checkedScopeFilter, isGlobalMode, trustAnnotatedFor, checker.getName());
+            safeFilter,
+            checkedScopeFilter,
+            isGlobalMode,
+            trustAnnotatedFor,
+            checker.getName(),
+            ResolutionEnvironment.system());
 
     System.out.println("[RuntimeAgent] Policy mode: " + (isGlobalMode ? "GLOBAL" : "STANDARD"));
     if (checkedClasses != null && !checkedClasses.isBlank()) {
