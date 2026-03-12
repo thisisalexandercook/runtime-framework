@@ -1,6 +1,8 @@
 package io.github.eisop.runtimeframework.instrumentation;
 
 import io.github.eisop.runtimeframework.core.CheckGenerator;
+import io.github.eisop.runtimeframework.planning.EnforcementPlanner;
+import io.github.eisop.runtimeframework.planning.StrategyBackedEnforcementPlanner;
 import io.github.eisop.runtimeframework.resolution.HierarchyResolver;
 import io.github.eisop.runtimeframework.resolution.ParentMethod;
 import io.github.eisop.runtimeframework.strategy.InstrumentationStrategy;
@@ -18,18 +20,27 @@ import java.util.List;
 public class EnforcementInstrumenter extends RuntimeInstrumenter {
 
   private final InstrumentationStrategy strategy;
+  private final EnforcementPlanner planner;
   private final HierarchyResolver hierarchyResolver;
 
   public EnforcementInstrumenter(
       InstrumentationStrategy strategy, HierarchyResolver hierarchyResolver) {
+    this(strategy, new StrategyBackedEnforcementPlanner(strategy), hierarchyResolver);
+  }
+
+  public EnforcementInstrumenter(
+      InstrumentationStrategy strategy,
+      EnforcementPlanner planner,
+      HierarchyResolver hierarchyResolver) {
     this.strategy = strategy;
+    this.planner = planner;
     this.hierarchyResolver = hierarchyResolver;
   }
 
   @Override
   protected CodeTransform createCodeTransform(
       ClassModel classModel, MethodModel methodModel, boolean isCheckedScope, ClassLoader loader) {
-    return new EnforcementTransform(strategy, classModel, methodModel, isCheckedScope, loader);
+    return new EnforcementTransform(planner, classModel, methodModel, isCheckedScope, loader);
   }
 
   @Override

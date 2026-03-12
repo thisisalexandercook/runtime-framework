@@ -126,6 +126,7 @@ public final class StrategyBackedEnforcementPlanner implements EnforcementPlanne
   }
 
   private List<InstrumentationAction> planMethodReturn(FlowEvent.MethodReturn event) {
+    TypeKind type = TypeKind.from(event.target().method().methodTypeSymbol().returnType());
     CheckGenerator generator = strategy.getReturnCheck(event.target().method());
     if (generator == null) {
       return List.of();
@@ -135,7 +136,7 @@ public final class StrategyBackedEnforcementPlanner implements EnforcementPlanne
         new InstrumentationAction.LegacyCheckAction(
             InjectionPoint.normalReturn(event.location().bytecodeIndex()),
             new ValueAccess.OperandStack(0),
-            TypeKind.REFERENCE,
+            type,
             generator,
             DiagnosticSpec.of(
                 "Return value of " + event.target().method().methodName().stringValue())));

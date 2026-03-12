@@ -1,12 +1,21 @@
 package io.github.eisop.runtimeframework.instrumentation;
 
-import io.github.eisop.runtimeframework.core.CheckGenerator;
-import io.github.eisop.runtimeframework.strategy.InstrumentationStrategy;
+import io.github.eisop.runtimeframework.filter.ClassInfo;
+import io.github.eisop.runtimeframework.planning.BytecodeLocation;
+import io.github.eisop.runtimeframework.planning.ClassContext;
+import io.github.eisop.runtimeframework.planning.DiagnosticSpec;
+import io.github.eisop.runtimeframework.planning.EnforcementPlanner;
+import io.github.eisop.runtimeframework.planning.FlowEvent;
+import io.github.eisop.runtimeframework.planning.InstrumentationAction;
+import io.github.eisop.runtimeframework.planning.MethodContext;
+import io.github.eisop.runtimeframework.planning.MethodPlan;
+import io.github.eisop.runtimeframework.planning.TargetRef;
+import io.github.eisop.runtimeframework.planning.ValueAccess;
+import io.github.eisop.runtimeframework.policy.ClassClassification;
 import java.lang.classfile.ClassModel;
 import java.lang.classfile.CodeBuilder;
 import java.lang.classfile.CodeElement;
 import java.lang.classfile.CodeTransform;
-import java.lang.classfile.FieldModel;
 import java.lang.classfile.Instruction;
 import java.lang.classfile.MethodModel;
 import java.lang.classfile.Opcode;
@@ -20,45 +29,62 @@ import java.lang.classfile.instruction.ReturnInstruction;
 import java.lang.classfile.instruction.StoreInstruction;
 import java.lang.constant.MethodTypeDesc;
 import java.lang.reflect.Modifier;
+import java.util.ArrayList;
+import java.util.List;
 
-/** A CodeTransform that injects runtime checks based on an InstrumentationStrategy. */
+/** A CodeTransform that injects runtime checks based on an {@link EnforcementPlanner}. */
 public class EnforcementTransform implements CodeTransform {
 
-  private final InstrumentationStrategy strategy;
-  private final ClassModel classModel;
-  private final MethodModel methodModel;
+  private static final String UNKNOWN_ARRAY_DESCRIPTOR = "[Ljava/lang/Object;";
+
+  private final EnforcementPlanner planner;
+  private final MethodContext methodContext;
   private final boolean isCheckedScope;
-  private final ClassLoader loader;
   private boolean entryChecksEmitted;
+  private int currentInstructionIndex;
+  private int currentSourceLine;
 
   public EnforcementTransform(
-      InstrumentationStrategy strategy,
+      EnforcementPlanner planner,
       ClassModel classModel,
       MethodModel methodModel,
       boolean isCheckedScope,
       ClassLoader loader) {
-    this.strategy = strategy;
-    this.classModel = classModel;
-    this.methodModel = methodModel;
+    this.planner = planner;
+    ClassContext classContext =
+        new ClassContext(
+            new ClassInfo(classModel.thisClass().asInternalName(), loader, null),
+            classModel,
+            isCheckedScope ? ClassClassification.CHECKED : ClassClassification.UNCHECKED);
+    this.methodContext = new MethodContext(classContext, methodModel);
     this.isCheckedScope = isCheckedScope;
-    this.loader = loader;
     this.entryChecksEmitted = !isCheckedScope;
+    this.currentInstructionIndex = 0;
+    this.currentSourceLine = BytecodeLocation.UNKNOWN_LINE;
   }
 
   @Override
   public void accept(CodeBuilder builder, CodeElement element) {
+    if (element instanceof LineNumber lineNumber) {
+      currentSourceLine = lineNumber.line();
+    }
+
     if (maybeEmitEntryChecks(builder, element)) {
       return;
     }
 
     switch (element) {
-      case FieldInstruction f -> handleField(builder, f);
-      case ReturnInstruction r -> handleReturn(builder, r);
-      case InvokeInstruction i -> handleInvoke(builder, i);
-      case ArrayStoreInstruction a -> handleArrayStore(builder, a);
-      case ArrayLoadInstruction a -> handleArrayLoad(builder, a);
-      case StoreInstruction s -> handleStore(builder, s);
+      case FieldInstruction f -> handleField(builder, f, currentLocation());
+      case ReturnInstruction r -> handleReturn(builder, r, currentLocation());
+      case InvokeInstruction i -> handleInvoke(builder, i, currentLocation());
+      case ArrayStoreInstruction a -> handleArrayStore(builder, a, currentLocation());
+      case ArrayLoadInstruction a -> handleArrayLoad(builder, a, currentLocation());
+      case StoreInstruction s -> handleStore(builder, s, currentLocation());
       default -> builder.with(element);
+    }
+
+    if (element instanceof Instruction) {
+      currentInstructionIndex++;
     }
   }
 
@@ -81,194 +107,129 @@ public class EnforcementTransform implements CodeTransform {
     return false;
   }
 
-  private void handleField(CodeBuilder b, FieldInstruction f) {
+  private void handleField(CodeBuilder b, FieldInstruction f, BytecodeLocation location) {
     if (isFieldWrite(f)) {
-      emitFieldWriteCheck(b, f);
+      FlowEvent.FieldWrite event =
+          new FlowEvent.FieldWrite(
+              methodContext,
+              location,
+              new TargetRef.Field(
+                  f.owner().asInternalName(),
+                  f.name().stringValue(),
+                  f.typeSymbol().descriptorString()),
+              f.opcode() == Opcode.PUTSTATIC);
+      emitPlannedActions(b, event, ActionTiming.BEFORE_INSTRUCTION);
       b.with(f);
     } else if (isFieldRead(f)) {
       b.with(f);
       if (isCheckedScope) {
-        emitFieldReadCheck(b, f);
+        FlowEvent.FieldRead event =
+            new FlowEvent.FieldRead(
+                methodContext,
+                location,
+                new TargetRef.Field(
+                    f.owner().asInternalName(),
+                    f.name().stringValue(),
+                    f.typeSymbol().descriptorString()));
+        emitPlannedActions(b, event, ActionTiming.AFTER_INSTRUCTION);
       }
     } else {
       b.with(f);
     }
   }
 
-  private void handleReturn(CodeBuilder b, ReturnInstruction r) {
+  private void handleReturn(CodeBuilder b, ReturnInstruction r, BytecodeLocation location) {
     if (isCheckedScope) {
-      emitReturnCheck(b);
+      FlowEvent.MethodReturn event =
+          new FlowEvent.MethodReturn(
+              methodContext,
+              location,
+              new TargetRef.MethodReturn(ownerInternalName(), methodContext.methodModel()));
+      emitPlannedActions(b, event, ActionTiming.NORMAL_RETURN);
     } else {
-      emitUncheckedReturnCheck(b, r);
+      if (r.opcode() == Opcode.ARETURN) {
+        FlowEvent.OverrideReturn event =
+            new FlowEvent.OverrideReturn(
+                methodContext,
+                location,
+                new TargetRef.MethodReturn(ownerInternalName(), methodContext.methodModel()));
+        emitPlannedActions(b, event, ActionTiming.NORMAL_RETURN);
+      }
     }
     b.with(r);
   }
 
-  private void handleInvoke(CodeBuilder b, InvokeInstruction i) {
+  private void handleInvoke(CodeBuilder b, InvokeInstruction i, BytecodeLocation location) {
     b.with(i);
     if (isCheckedScope) {
-      emitMethodCallCheck(b, i);
+      FlowEvent.BoundaryCallReturn event =
+          new FlowEvent.BoundaryCallReturn(
+              methodContext,
+              location,
+              new TargetRef.InvokedMethod(
+                  i.owner().asInternalName(), i.name().stringValue(), i.typeSymbol()));
+      emitPlannedActions(b, event, ActionTiming.AFTER_INSTRUCTION);
     }
   }
 
-  private void handleArrayStore(CodeBuilder b, ArrayStoreInstruction a) {
-    emitArrayStoreCheck(b, a);
+  private void handleArrayStore(
+      CodeBuilder b, ArrayStoreInstruction a, BytecodeLocation location) {
+    if (a.opcode() == Opcode.AASTORE) {
+      FlowEvent.ArrayStore event =
+          new FlowEvent.ArrayStore(
+              methodContext,
+              location,
+              new TargetRef.ArrayComponent(UNKNOWN_ARRAY_DESCRIPTOR));
+      emitPlannedActions(b, event, ActionTiming.BEFORE_INSTRUCTION);
+    }
     b.with(a);
   }
 
-  private void handleArrayLoad(CodeBuilder b, ArrayLoadInstruction a) {
+  private void handleArrayLoad(CodeBuilder b, ArrayLoadInstruction a, BytecodeLocation location) {
     b.with(a);
-    if (isCheckedScope) {
-      emitArrayLoadCheck(b, a);
+    if (isCheckedScope && a.opcode() == Opcode.AALOAD) {
+      FlowEvent.ArrayLoad event =
+          new FlowEvent.ArrayLoad(
+              methodContext,
+              location,
+              new TargetRef.ArrayComponent(UNKNOWN_ARRAY_DESCRIPTOR));
+      emitPlannedActions(b, event, ActionTiming.AFTER_INSTRUCTION);
     }
   }
 
-  private void handleStore(CodeBuilder b, StoreInstruction s) {
+  private void handleStore(CodeBuilder b, StoreInstruction s, BytecodeLocation location) {
     if (isCheckedScope) {
-      emitStoreCheck(b, s);
+      boolean isRefStore =
+          switch (s.opcode()) {
+            case ASTORE, ASTORE_0, ASTORE_1, ASTORE_2, ASTORE_3 -> true;
+            default -> false;
+          };
+      if (isRefStore) {
+        FlowEvent.LocalStore event =
+            new FlowEvent.LocalStore(
+                methodContext,
+                location,
+                new TargetRef.Local(methodContext.methodModel(), s.slot(), location.bytecodeIndex()));
+        emitPlannedActions(b, event, ActionTiming.BEFORE_INSTRUCTION);
+      }
     }
     b.with(s);
   }
 
   public void emitParameterChecks(CodeBuilder builder) {
-    boolean isStatic = (methodModel.flags().flagsMask() & Modifier.STATIC) != 0;
-    int slotIndex = isStatic ? 0 : 1;
+    MethodModel methodModel = methodContext.methodModel();
     MethodTypeDesc methodDesc = methodModel.methodTypeSymbol();
     int paramCount = methodDesc.parameterList().size();
-
+    List<FlowEvent> events = new ArrayList<>(paramCount);
     for (int i = 0; i < paramCount; i++) {
-      TypeKind type = TypeKind.from(methodDesc.parameterList().get(i));
-      CheckGenerator target = strategy.getParameterCheck(methodModel, i, type);
-
-      if (target != null) {
-        builder.aload(slotIndex);
-        target.generateCheck(builder, type, "Parameter " + i);
-      }
-
-      slotIndex += type.slotSize();
+      events.add(
+          new FlowEvent.MethodParameter(
+              methodContext,
+              BytecodeLocation.at(-1, currentSourceLine),
+              new TargetRef.MethodParameter(ownerInternalName(), methodModel, i)));
     }
-  }
-
-  private void emitFieldWriteCheck(CodeBuilder b, FieldInstruction field) {
-    CheckGenerator target = null;
-    TypeKind type = TypeKind.fromDescriptor(field.typeSymbol().descriptorString());
-
-    if (field.owner().asInternalName().equals(classModel.thisClass().asInternalName())) {
-      FieldModel targetField = findField(classModel, field);
-      if (targetField != null) {
-        target = strategy.getFieldWriteCheck(targetField, type);
-      }
-    } else {
-      target =
-          strategy.getBoundaryFieldWriteCheck(
-              field.owner().asInternalName(), field.name().stringValue(), type, loader);
-    }
-
-    if (target != null) {
-      if (field.opcode() == Opcode.PUTSTATIC) {
-        b.dup();
-        target.generateCheck(b, type, "Static Field '" + field.name().stringValue() + "'");
-      } else if (field.opcode() == Opcode.PUTFIELD) {
-        b.dup_x1();
-        target.generateCheck(b, type, "Field '" + field.name().stringValue() + "'");
-        b.swap();
-      }
-    }
-  }
-
-  private void emitFieldReadCheck(CodeBuilder b, FieldInstruction field) {
-    CheckGenerator target = null;
-    TypeKind type = TypeKind.fromDescriptor(field.typeSymbol().descriptorString());
-
-    if (field.owner().asInternalName().equals(classModel.thisClass().asInternalName())) {
-      FieldModel targetField = findField(classModel, field);
-      if (targetField != null) {
-        target = strategy.getFieldReadCheck(targetField, type);
-      }
-    } else {
-      target =
-          strategy.getBoundaryFieldReadCheck(
-              field.owner().asInternalName(), field.name().stringValue(), type, loader);
-    }
-
-    if (target != null) {
-      if (type.slotSize() == 1) {
-        b.dup();
-        target.generateCheck(b, type, "Read Field '" + field.name().stringValue() + "'");
-      }
-    }
-  }
-
-  private void emitReturnCheck(CodeBuilder b) {
-    CheckGenerator target = strategy.getReturnCheck(methodModel);
-    if (target != null) {
-      b.dup();
-      target.generateCheck(
-          b, TypeKind.REFERENCE, "Return value of " + methodModel.methodName().stringValue());
-    }
-  }
-
-  private void emitUncheckedReturnCheck(CodeBuilder b, ReturnInstruction ret) {
-    if (ret.opcode() != Opcode.ARETURN) return;
-    CheckGenerator target =
-        strategy.getUncheckedOverrideReturnCheck(classModel, methodModel, loader);
-
-    if (target != null) {
-      b.dup();
-      target.generateCheck(
-          b,
-          TypeKind.REFERENCE,
-          "Return value of overridden method " + methodModel.methodName().stringValue());
-    }
-  }
-
-  private void emitMethodCallCheck(CodeBuilder b, InvokeInstruction invoke) {
-    CheckGenerator target =
-        strategy.getBoundaryCallCheck(invoke.owner().asInternalName(), invoke.typeSymbol(), loader);
-
-    if (target != null) {
-      b.dup();
-      target.generateCheck(
-          b, TypeKind.REFERENCE, "Return value of " + invoke.name().stringValue() + " (Boundary)");
-    }
-  }
-
-  private void emitArrayStoreCheck(CodeBuilder b, ArrayStoreInstruction instruction) {
-    if (instruction.opcode() == Opcode.AASTORE) {
-      CheckGenerator target = strategy.getArrayStoreCheck(TypeKind.REFERENCE);
-      if (target != null) {
-        b.dup();
-        target.generateCheck(b, TypeKind.REFERENCE, "Array Element Write");
-      }
-    }
-  }
-
-  private void emitArrayLoadCheck(CodeBuilder b, ArrayLoadInstruction instruction) {
-    if (instruction.opcode() == Opcode.AALOAD) {
-      CheckGenerator target = strategy.getArrayLoadCheck(TypeKind.REFERENCE);
-      if (target != null) {
-        b.dup();
-        target.generateCheck(b, TypeKind.REFERENCE, "Array Element Read");
-      }
-    }
-  }
-
-  private void emitStoreCheck(CodeBuilder b, StoreInstruction instruction) {
-    boolean isRefStore =
-        switch (instruction.opcode()) {
-          case ASTORE, ASTORE_0, ASTORE_1, ASTORE_2, ASTORE_3 -> true;
-          default -> false;
-        };
-
-    if (!isRefStore) return;
-
-    int slot = instruction.slot();
-    CheckGenerator target =
-        strategy.getLocalVariableWriteCheck(methodModel, slot, TypeKind.REFERENCE);
-
-    if (target != null) {
-      b.dup();
-      target.generateCheck(b, TypeKind.REFERENCE, "Local Variable Assignment (Slot " + slot + ")");
+    if (!events.isEmpty()) {
+      emitActions(builder, planner.planMethod(methodContext, events), ActionTiming.METHOD_ENTRY, null);
     }
   }
 
@@ -280,13 +241,131 @@ public class EnforcementTransform implements CodeTransform {
     return f.opcode() == Opcode.GETFIELD || f.opcode() == Opcode.GETSTATIC;
   }
 
-  private FieldModel findField(ClassModel classModel, FieldInstruction field) {
-    for (FieldModel fm : classModel.fields()) {
-      if (fm.fieldName().stringValue().equals(field.name().stringValue())
-          && fm.fieldType().stringValue().equals(field.type().stringValue())) {
-        return fm;
+  private void emitPlannedActions(CodeBuilder builder, FlowEvent event, ActionTiming timing) {
+    emitActions(builder, planner.planMethod(methodContext, List.of(event)), timing, event);
+  }
+
+  private void emitActions(
+      CodeBuilder builder, MethodPlan plan, ActionTiming timing, FlowEvent event) {
+    for (InstrumentationAction action : plan.actions()) {
+      if (timing.matches(action)) {
+        emitAction(builder, action, event);
       }
     }
-    return null;
+  }
+
+  private void emitAction(CodeBuilder builder, InstrumentationAction action, FlowEvent event) {
+    switch (action) {
+      case InstrumentationAction.LegacyCheckAction legacyCheckAction ->
+          emitLegacyCheckAction(builder, legacyCheckAction, event);
+      case InstrumentationAction.ValueCheckAction ignored ->
+          throw new IllegalStateException("ValueCheckAction emission is not implemented yet");
+      case InstrumentationAction.LifecycleHookAction ignored ->
+          throw new IllegalStateException("LifecycleHookAction emission is not implemented yet");
+    }
+  }
+
+  private void emitLegacyCheckAction(
+      CodeBuilder builder,
+      InstrumentationAction.LegacyCheckAction action,
+      FlowEvent event) {
+    String diagnosticName = action.diagnostic().displayName();
+    switch (action.valueAccess()) {
+      case ValueAccess.LocalSlot localSlot -> {
+        loadLocal(builder, action.valueType(), localSlot.slot());
+        action.generator().generateCheck(builder, action.valueType(), diagnosticName);
+      }
+      case ValueAccess.ThisReference ignored -> {
+        builder.aload(0);
+        action.generator().generateCheck(builder, action.valueType(), diagnosticName);
+      }
+      case ValueAccess.OperandStack operandStack -> {
+        if (operandStack.depthFromTop() != 0) {
+          throw new IllegalStateException("Only top-of-stack access is currently supported");
+        }
+        if (event instanceof FlowEvent.FieldWrite fieldWrite) {
+          emitFieldWriteStackCheck(
+              builder,
+              action.valueType(),
+              action.generator(),
+              diagnosticName,
+              fieldWrite.isStaticAccess());
+        } else {
+          emitTopOfStackCheck(builder, action.valueType(), action.generator(), diagnosticName);
+        }
+      }
+    }
+  }
+
+  private void emitTopOfStackCheck(
+      CodeBuilder builder, TypeKind type, io.github.eisop.runtimeframework.core.CheckGenerator generator, String diagnosticName) {
+    switch (type.slotSize()) {
+      case 1 -> builder.dup();
+      case 2 -> builder.dup2();
+      default -> throw new IllegalStateException("Unsupported stack size for check emission: " + type);
+    }
+    generator.generateCheck(builder, type, diagnosticName);
+  }
+
+  private void emitFieldWriteStackCheck(
+      CodeBuilder builder,
+      TypeKind type,
+      io.github.eisop.runtimeframework.core.CheckGenerator generator,
+      String diagnosticName,
+      boolean isStaticAccess) {
+    if (isStaticAccess) {
+      emitTopOfStackCheck(builder, type, generator, diagnosticName);
+      return;
+    }
+
+    if (type.slotSize() != 1) {
+      throw new IllegalStateException("PUTFIELD check currently expects a single-slot value");
+    }
+    builder.dup_x1();
+    generator.generateCheck(builder, type, diagnosticName);
+    builder.swap();
+  }
+
+  private void loadLocal(CodeBuilder builder, TypeKind type, int slot) {
+    switch (type) {
+      case INT, BYTE, CHAR, SHORT, BOOLEAN -> builder.iload(slot);
+      case LONG -> builder.lload(slot);
+      case FLOAT -> builder.fload(slot);
+      case DOUBLE -> builder.dload(slot);
+      case REFERENCE -> builder.aload(slot);
+      default -> throw new IllegalArgumentException("Unsupported local load type: " + type);
+    }
+  }
+
+  private BytecodeLocation currentLocation() {
+    return BytecodeLocation.at(currentInstructionIndex, currentSourceLine);
+  }
+
+  private String ownerInternalName() {
+    return methodContext.classContext().classInfo().internalName();
+  }
+
+  private enum ActionTiming {
+    METHOD_ENTRY,
+    BEFORE_INSTRUCTION,
+    AFTER_INSTRUCTION,
+    NORMAL_RETURN;
+
+    private boolean matches(InstrumentationAction action) {
+      return switch (this) {
+        case METHOD_ENTRY ->
+            action.injectionPoint().kind()
+                == io.github.eisop.runtimeframework.planning.InjectionPoint.Kind.METHOD_ENTRY;
+        case BEFORE_INSTRUCTION ->
+            action.injectionPoint().kind()
+                == io.github.eisop.runtimeframework.planning.InjectionPoint.Kind.BEFORE_INSTRUCTION;
+        case AFTER_INSTRUCTION ->
+            action.injectionPoint().kind()
+                == io.github.eisop.runtimeframework.planning.InjectionPoint.Kind.AFTER_INSTRUCTION;
+        case NORMAL_RETURN ->
+            action.injectionPoint().kind()
+                == io.github.eisop.runtimeframework.planning.InjectionPoint.Kind.NORMAL_RETURN;
+      };
+    }
   }
 }
