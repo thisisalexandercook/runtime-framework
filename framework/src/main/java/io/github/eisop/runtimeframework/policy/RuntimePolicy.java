@@ -1,6 +1,7 @@
 package io.github.eisop.runtimeframework.policy;
 
 import io.github.eisop.runtimeframework.filter.ClassInfo;
+import io.github.eisop.runtimeframework.planning.FlowEvent;
 import java.lang.classfile.ClassModel;
 
 /** Defines runtime policy decisions for class classification and instrumentation scope. */
@@ -26,5 +27,9 @@ public interface RuntimePolicy {
 
   default boolean isChecked(ClassInfo info, ClassModel model) {
     return classify(info, model) == ClassClassification.CHECKED;
+  }
+
+  default boolean allows(FlowEvent event) {
+    return true;
   }
 }

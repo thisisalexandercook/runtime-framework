@@ -10,6 +10,7 @@ import io.github.eisop.runtimeframework.planning.ValueAccess;
 import io.github.eisop.runtimeframework.policy.ClassClassification;
 import io.github.eisop.runtimeframework.resolution.HierarchyResolver;
 import io.github.eisop.runtimeframework.resolution.ParentMethod;
+import io.github.eisop.runtimeframework.semantics.PropertyEmitter;
 import io.github.eisop.runtimeframework.strategy.InstrumentationStrategy;
 import java.lang.classfile.ClassBuilder;
 import java.lang.classfile.ClassModel;
@@ -26,21 +27,31 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
 
   private final EnforcementPlanner planner;
   private final HierarchyResolver hierarchyResolver;
+  private final PropertyEmitter propertyEmitter;
 
   public EnforcementInstrumenter(
       InstrumentationStrategy strategy, HierarchyResolver hierarchyResolver) {
-    this(new StrategyBackedEnforcementPlanner(strategy), hierarchyResolver);
+    this(new StrategyBackedEnforcementPlanner(strategy), hierarchyResolver, null);
   }
 
   public EnforcementInstrumenter(EnforcementPlanner planner, HierarchyResolver hierarchyResolver) {
+    this(planner, hierarchyResolver, null);
+  }
+
+  public EnforcementInstrumenter(
+      EnforcementPlanner planner,
+      HierarchyResolver hierarchyResolver,
+      PropertyEmitter propertyEmitter) {
     this.planner = planner;
     this.hierarchyResolver = hierarchyResolver;
+    this.propertyEmitter = propertyEmitter;
   }
 
   @Override
   protected CodeTransform createCodeTransform(
       ClassModel classModel, MethodModel methodModel, boolean isCheckedScope, ClassLoader loader) {
-    return new EnforcementTransform(planner, classModel, methodModel, isCheckedScope, loader);
+    return new EnforcementTransform(
+        planner, propertyEmitter, classModel, methodModel, isCheckedScope, loader);
   }
 
   @Override
@@ -108,10 +119,25 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
     switch (action) {
       case InstrumentationAction.LegacyCheckAction legacyCheckAction ->
           emitLegacyBridgeCheck(builder, legacyCheckAction);
-      case InstrumentationAction.ValueCheckAction ignored ->
-          throw new IllegalStateException("ValueCheckAction emission is not implemented yet");
+      case InstrumentationAction.ValueCheckAction valueCheckAction ->
+          emitValueCheckAction(builder, valueCheckAction);
       case InstrumentationAction.LifecycleHookAction ignored ->
           throw new IllegalStateException("LifecycleHookAction emission is not implemented yet");
+    }
+  }
+
+  private void emitValueCheckAction(
+      CodeBuilder builder, InstrumentationAction.ValueCheckAction action) {
+    if (propertyEmitter == null) {
+      throw new IllegalStateException("ValueCheckAction emission requires a property emitter");
+    }
+    for (var requirement : action.contract().requirements()) {
+      propertyEmitter.emitCheck(
+          builder,
+          requirement,
+          action.valueAccess(),
+          action.attribution(),
+          action.diagnostic());
     }
   }
 
@@ -133,6 +159,9 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
         }
         emitTopOfStackCheck(builder, action.valueType(), action);
       }
+      case ValueAccess.FieldWriteValue ignored ->
+          throw new IllegalStateException(
+              "Legacy bridge actions do not support planner-native field-write access");
     }
   }
 

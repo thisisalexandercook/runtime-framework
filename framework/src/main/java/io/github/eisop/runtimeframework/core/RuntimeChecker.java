@@ -1,8 +1,13 @@
 package io.github.eisop.runtimeframework.core;
 
+import io.github.eisop.runtimeframework.instrumentation.EnforcementInstrumenter;
 import io.github.eisop.runtimeframework.instrumentation.RuntimeInstrumenter;
+import io.github.eisop.runtimeframework.planning.SemanticsBackedEnforcementPlanner;
 import io.github.eisop.runtimeframework.policy.RuntimePolicy;
+import io.github.eisop.runtimeframework.resolution.BytecodeHierarchyResolver;
+import io.github.eisop.runtimeframework.resolution.HierarchyResolver;
 import io.github.eisop.runtimeframework.resolution.ResolutionEnvironment;
+import io.github.eisop.runtimeframework.semantics.CheckerSemantics;
 import io.github.eisop.runtimeframework.strategy.BoundaryStrategy;
 import io.github.eisop.runtimeframework.strategy.InstrumentationStrategy;
 
@@ -15,12 +20,32 @@ public abstract class RuntimeChecker {
   /** Returns the name of this checker. This string should match the name used in AnnotatedFor */
   public abstract String getName();
 
+  /** Returns the semantic model used by the framework planner for this checker. */
+  public abstract CheckerSemantics getSemantics();
+
+  public final RuntimeInstrumenter createInstrumenter(RuntimePolicy policy) {
+    return createInstrumenter(policy, ResolutionEnvironment.system());
+  }
+
+  public RuntimeInstrumenter createInstrumenter(
+      RuntimePolicy policy, ResolutionEnvironment resolutionEnvironment) {
+    CheckerSemantics semantics = getSemantics();
+    HierarchyResolver resolver =
+        new BytecodeHierarchyResolver(info -> policy.isChecked(info), resolutionEnvironment);
+    return new EnforcementInstrumenter(
+        new SemanticsBackedEnforcementPlanner(policy, semantics, resolutionEnvironment),
+        resolver,
+        semantics.emitter());
+  }
+
   /**
-   * Creates or returns the instrumenter that injects this checker's logic.
-   *
-   * @param policy The active runtime policy that classifies checked/unchecked scope.
+   * Transitional compatibility hook retained while external callers migrate to framework-owned
+   * instrumenter construction.
    */
-  public abstract RuntimeInstrumenter getInstrumenter(RuntimePolicy policy);
+  @Deprecated
+  public RuntimeInstrumenter getInstrumenter(RuntimePolicy policy) {
+    return createInstrumenter(policy);
+  }
 
   /**
    * Helper method to create the instrumentation strategy based on the active policy.

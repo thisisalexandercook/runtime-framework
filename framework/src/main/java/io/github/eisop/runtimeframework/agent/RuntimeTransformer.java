@@ -17,7 +17,7 @@ public class RuntimeTransformer implements ClassFileTransformer {
 
   public RuntimeTransformer(RuntimePolicy policy, RuntimeChecker checker) {
     this.policy = policy;
-    this.instrumenter = checker.getInstrumenter(policy);
+    this.instrumenter = checker.createInstrumenter(policy);
   }
 
   @Override

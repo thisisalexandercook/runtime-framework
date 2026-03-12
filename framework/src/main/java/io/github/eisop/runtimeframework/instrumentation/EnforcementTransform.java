@@ -3,7 +3,6 @@ package io.github.eisop.runtimeframework.instrumentation;
 import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.planning.BytecodeLocation;
 import io.github.eisop.runtimeframework.planning.ClassContext;
-import io.github.eisop.runtimeframework.planning.DiagnosticSpec;
 import io.github.eisop.runtimeframework.planning.EnforcementPlanner;
 import io.github.eisop.runtimeframework.planning.FlowEvent;
 import io.github.eisop.runtimeframework.planning.InstrumentationAction;
@@ -12,6 +11,7 @@ import io.github.eisop.runtimeframework.planning.MethodPlan;
 import io.github.eisop.runtimeframework.planning.TargetRef;
 import io.github.eisop.runtimeframework.planning.ValueAccess;
 import io.github.eisop.runtimeframework.policy.ClassClassification;
+import io.github.eisop.runtimeframework.semantics.PropertyEmitter;
 import java.lang.classfile.ClassModel;
 import java.lang.classfile.CodeBuilder;
 import java.lang.classfile.CodeElement;
@@ -28,7 +28,6 @@ import java.lang.classfile.instruction.LineNumber;
 import java.lang.classfile.instruction.ReturnInstruction;
 import java.lang.classfile.instruction.StoreInstruction;
 import java.lang.constant.MethodTypeDesc;
-import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -38,6 +37,7 @@ public class EnforcementTransform implements CodeTransform {
   private static final String UNKNOWN_ARRAY_DESCRIPTOR = "[Ljava/lang/Object;";
 
   private final EnforcementPlanner planner;
+  private final PropertyEmitter propertyEmitter;
   private final MethodContext methodContext;
   private final boolean isCheckedScope;
   private boolean entryChecksEmitted;
@@ -46,11 +46,13 @@ public class EnforcementTransform implements CodeTransform {
 
   public EnforcementTransform(
       EnforcementPlanner planner,
+      PropertyEmitter propertyEmitter,
       ClassModel classModel,
       MethodModel methodModel,
       boolean isCheckedScope,
       ClassLoader loader) {
     this.planner = planner;
+    this.propertyEmitter = propertyEmitter;
     ClassContext classContext =
         new ClassContext(
             new ClassInfo(classModel.thisClass().asInternalName(), loader, null),
@@ -258,10 +260,25 @@ public class EnforcementTransform implements CodeTransform {
     switch (action) {
       case InstrumentationAction.LegacyCheckAction legacyCheckAction ->
           emitLegacyCheckAction(builder, legacyCheckAction, event);
-      case InstrumentationAction.ValueCheckAction ignored ->
-          throw new IllegalStateException("ValueCheckAction emission is not implemented yet");
+      case InstrumentationAction.ValueCheckAction valueCheckAction ->
+          emitValueCheckAction(builder, valueCheckAction);
       case InstrumentationAction.LifecycleHookAction ignored ->
           throw new IllegalStateException("LifecycleHookAction emission is not implemented yet");
+    }
+  }
+
+  private void emitValueCheckAction(
+      CodeBuilder builder, InstrumentationAction.ValueCheckAction action) {
+    if (propertyEmitter == null) {
+      throw new IllegalStateException("ValueCheckAction emission requires a property emitter");
+    }
+    for (var requirement : action.contract().requirements()) {
+      propertyEmitter.emitCheck(
+          builder,
+          requirement,
+          action.valueAccess(),
+          action.attribution(),
+          action.diagnostic());
     }
   }
 
@@ -294,6 +311,9 @@ public class EnforcementTransform implements CodeTransform {
           emitTopOfStackCheck(builder, action.valueType(), action.generator(), diagnosticName);
         }
       }
+      case ValueAccess.FieldWriteValue ignored ->
+          throw new IllegalStateException(
+              "Legacy check actions do not support planner-native field-write access");
     }
   }
 

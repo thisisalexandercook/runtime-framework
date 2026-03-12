@@ -27,7 +27,7 @@ public sealed interface InstrumentationAction
       Objects.requireNonNull(contract, "contract");
       Objects.requireNonNull(attribution, "attribution");
       Objects.requireNonNull(diagnostic, "diagnostic");
-      }
+    }
   }
 
   /**
