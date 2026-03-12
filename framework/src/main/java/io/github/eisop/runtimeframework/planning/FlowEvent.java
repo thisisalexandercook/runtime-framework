@@ -61,7 +61,7 @@ public sealed interface FlowEvent
   }
 
   record BoundaryCallReturn(
-      MethodContext methodContext, BytecodeLocation location, TargetRef.MethodReturn target)
+      MethodContext methodContext, BytecodeLocation location, TargetRef.InvokedMethod target)
       implements FlowEvent {
     public BoundaryCallReturn {
       Objects.requireNonNull(methodContext, "methodContext");
@@ -89,7 +89,11 @@ public sealed interface FlowEvent
     }
   }
 
-  record FieldWrite(MethodContext methodContext, BytecodeLocation location, TargetRef.Field target)
+  record FieldWrite(
+      MethodContext methodContext,
+      BytecodeLocation location,
+      TargetRef.Field target,
+      boolean isStaticAccess)
       implements FlowEvent {
     public FieldWrite {
       Objects.requireNonNull(methodContext, "methodContext");

@@ -1,12 +1,14 @@
 package io.github.eisop.runtimeframework.planning;
 
 import java.lang.classfile.MethodModel;
+import java.lang.constant.MethodTypeDesc;
 import java.util.Objects;
 
 /** Identifies the target contract to resolve for a particular flow. */
 public sealed interface TargetRef
     permits TargetRef.MethodParameter,
         TargetRef.MethodReturn,
+        TargetRef.InvokedMethod,
         TargetRef.Field,
         TargetRef.ArrayComponent,
         TargetRef.Local,
@@ -24,6 +26,15 @@ public sealed interface TargetRef
     public MethodReturn {
       Objects.requireNonNull(ownerInternalName, "ownerInternalName");
       Objects.requireNonNull(method, "method");
+    }
+  }
+
+  record InvokedMethod(String ownerInternalName, String methodName, MethodTypeDesc descriptor)
+      implements TargetRef {
+    public InvokedMethod {
+      Objects.requireNonNull(ownerInternalName, "ownerInternalName");
+      Objects.requireNonNull(methodName, "methodName");
+      Objects.requireNonNull(descriptor, "descriptor");
     }
   }
 

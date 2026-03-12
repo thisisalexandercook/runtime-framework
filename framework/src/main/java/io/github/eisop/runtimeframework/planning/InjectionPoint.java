@@ -25,6 +25,14 @@ public record InjectionPoint(Kind kind, int bytecodeIndex) {
     return new InjectionPoint(Kind.NORMAL_RETURN, bytecodeIndex);
   }
 
+  public static InjectionPoint bridgeEntry() {
+    return new InjectionPoint(Kind.BRIDGE_ENTRY, -1);
+  }
+
+  public static InjectionPoint bridgeExit() {
+    return new InjectionPoint(Kind.BRIDGE_EXIT, -1);
+  }
+
   public enum Kind {
     METHOD_ENTRY,
     BEFORE_INSTRUCTION,
