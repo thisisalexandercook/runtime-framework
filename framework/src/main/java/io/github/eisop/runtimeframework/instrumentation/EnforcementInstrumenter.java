@@ -1,9 +1,9 @@
 package io.github.eisop.runtimeframework.instrumentation;
 
 import io.github.eisop.runtimeframework.filter.ClassInfo;
-import io.github.eisop.runtimeframework.planning.EnforcementPlanner;
 import io.github.eisop.runtimeframework.planning.BridgePlan;
 import io.github.eisop.runtimeframework.planning.ClassContext;
+import io.github.eisop.runtimeframework.planning.EnforcementPlanner;
 import io.github.eisop.runtimeframework.planning.InstrumentationAction;
 import io.github.eisop.runtimeframework.planning.StrategyBackedEnforcementPlanner;
 import io.github.eisop.runtimeframework.planning.ValueAccess;
@@ -106,8 +106,7 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
         });
   }
 
-  private void emitBridgeActions(
-      CodeBuilder builder, BridgePlan plan, BridgeActionTiming timing) {
+  private void emitBridgeActions(CodeBuilder builder, BridgePlan plan, BridgeActionTiming timing) {
     for (InstrumentationAction action : plan.actions()) {
       if (timing.matches(action)) {
         emitBridgeAction(builder, action);
@@ -133,11 +132,7 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
     }
     for (var requirement : action.contract().requirements()) {
       propertyEmitter.emitCheck(
-          builder,
-          requirement,
-          action.valueAccess(),
-          action.attribution(),
-          action.diagnostic());
+          builder, requirement, action.valueAccess(), action.attribution(), action.diagnostic());
     }
   }
 
@@ -170,7 +165,8 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
     switch (type.slotSize()) {
       case 1 -> builder.dup();
       case 2 -> builder.dup2();
-      default -> throw new IllegalStateException("Unsupported stack size for check emission: " + type);
+      default ->
+          throw new IllegalStateException("Unsupported stack size for check emission: " + type);
     }
     action.generator().generateCheck(builder, type, action.diagnostic().displayName());
   }

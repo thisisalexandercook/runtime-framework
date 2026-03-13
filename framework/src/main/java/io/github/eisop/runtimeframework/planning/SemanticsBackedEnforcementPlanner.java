@@ -25,7 +25,9 @@ public final class SemanticsBackedEnforcementPlanner implements EnforcementPlann
   private final ResolutionEnvironment resolutionEnvironment;
 
   public SemanticsBackedEnforcementPlanner(
-      RuntimePolicy policy, CheckerSemantics semantics, ResolutionEnvironment resolutionEnvironment) {
+      RuntimePolicy policy,
+      CheckerSemantics semantics,
+      ResolutionEnvironment resolutionEnvironment) {
     this.policy = Objects.requireNonNull(policy, "policy");
     this.contracts = Objects.requireNonNull(semantics, "semantics").contracts();
     this.resolutionEnvironment =
@@ -141,8 +143,7 @@ public final class SemanticsBackedEnforcementPlanner implements EnforcementPlann
         InjectionPoint.normalReturn(event.location().bytecodeIndex()),
         new ValueAccess.OperandStack(0),
         AttributionKind.LOCAL,
-        DiagnosticSpec.of(
-            "Return value of " + event.target().method().methodName().stringValue()));
+        DiagnosticSpec.of("Return value of " + event.target().method().methodName().stringValue()));
   }
 
   private List<InstrumentationAction> planBoundaryCallReturn(
@@ -304,8 +305,7 @@ public final class SemanticsBackedEnforcementPlanner implements EnforcementPlann
 
   private static boolean sameSignature(MethodModel left, MethodModel right) {
     return left.methodName().stringValue().equals(right.methodName().stringValue())
-        && left
-            .methodTypeSymbol()
+        && left.methodTypeSymbol()
             .descriptorString()
             .equals(right.methodTypeSymbol().descriptorString());
   }
@@ -323,5 +323,6 @@ public final class SemanticsBackedEnforcementPlanner implements EnforcementPlann
         method.methodTypeSymbol().parameterList().get(parameterIndex).descriptorString();
     return descriptor.equals("J") || descriptor.equals("D") ? 2 : 1;
   }
+
   private record CheckedOverrideTarget(String ownerInternalName, MethodModel method) {}
 }

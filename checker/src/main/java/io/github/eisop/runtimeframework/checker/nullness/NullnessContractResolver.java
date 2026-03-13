@@ -33,7 +33,8 @@ public final class NullnessContractResolver implements ContractResolver {
       case TargetRef.MethodReturn methodReturn -> resolveMethodReturn(methodReturn);
       case TargetRef.InvokedMethod invokedMethod -> resolveInvokedMethod(invokedMethod, context);
       case TargetRef.Field field -> resolveField(field, context);
-      case TargetRef.ArrayComponent arrayComponent -> resolveArrayComponent(arrayComponent, context);
+      case TargetRef.ArrayComponent arrayComponent ->
+          resolveArrayComponent(arrayComponent, context);
       case TargetRef.Local local -> resolveLocal(local, context);
       case TargetRef.Receiver receiver -> NON_NULL_CONTRACT;
     };
@@ -41,7 +42,8 @@ public final class NullnessContractResolver implements ContractResolver {
 
   private ValueContract resolveMethodParameter(TargetRef.MethodParameter target) {
     MethodTypeDesc descriptor = target.method().methodTypeSymbol();
-    String parameterDescriptor = descriptor.parameterList().get(target.parameterIndex()).descriptorString();
+    String parameterDescriptor =
+        descriptor.parameterList().get(target.parameterIndex()).descriptorString();
     if (!isReferenceDescriptor(parameterDescriptor)) {
       return ValueContract.none();
     }
@@ -111,7 +113,8 @@ public final class NullnessContractResolver implements ContractResolver {
 
   private AnnotatedTypeUse arrayComponentTypeUse(
       TargetRef.ArrayComponent target, ResolutionContext context) {
-    AnnotatedTypeUse parentType = arraySourceTypeUse(target.arrayTarget(), target.arrayDescriptor(), context);
+    AnnotatedTypeUse parentType =
+        arraySourceTypeUse(target.arrayTarget(), target.arrayDescriptor(), context);
     if (parentType == null || !target.arrayDescriptor().startsWith("[")) {
       return null;
     }
@@ -131,7 +134,8 @@ public final class NullnessContractResolver implements ContractResolver {
       remainingTypeAnnotations.add(
           new TypeUseAnnotation(typeAnnotation.annotation(), List.copyOf(remainingPath)));
     }
-    return new AnnotatedTypeUse(componentDescriptor, List.copyOf(rootAnnotations), List.copyOf(remainingTypeAnnotations));
+    return new AnnotatedTypeUse(
+        componentDescriptor, List.copyOf(rootAnnotations), List.copyOf(remainingTypeAnnotations));
   }
 
   private AnnotatedTypeUse arraySourceTypeUse(
@@ -146,14 +150,17 @@ public final class NullnessContractResolver implements ContractResolver {
       case TargetRef.MethodReturn methodReturn -> methodReturnTypeUse(methodReturn.method());
       case TargetRef.InvokedMethod invokedMethod -> invokedMethodTypeUse(invokedMethod, context);
       case TargetRef.Field field -> fieldTypeUse(field, context);
-      case TargetRef.ArrayComponent arrayComponent -> arrayComponentTypeUse(arrayComponent, context);
+      case TargetRef.ArrayComponent arrayComponent ->
+          arrayComponentTypeUse(arrayComponent, context);
       case TargetRef.Local local -> localTypeUse(local, descriptorHint, context);
-      case TargetRef.Receiver receiver -> new AnnotatedTypeUse("L" + receiver.ownerInternalName() + ";", List.of(), List.of());
+      case TargetRef.Receiver receiver ->
+          new AnnotatedTypeUse("L" + receiver.ownerInternalName() + ";", List.of(), List.of());
     };
   }
 
   private AnnotatedTypeUse methodParameterTypeUse(MethodModel method, int parameterIndex) {
-    String descriptor = method.methodTypeSymbol().parameterList().get(parameterIndex).descriptorString();
+    String descriptor =
+        method.methodTypeSymbol().parameterList().get(parameterIndex).descriptorString();
     List<Annotation> rootAnnotations = new ArrayList<>();
     List<TypeUseAnnotation> typeAnnotations = new ArrayList<>();
 
@@ -171,13 +178,15 @@ public final class NullnessContractResolver implements ContractResolver {
         .ifPresent(
             attr -> {
               for (TypeAnnotation typeAnnotation : attr.annotations()) {
-                if (typeAnnotation.targetInfo() instanceof TypeAnnotation.FormalParameterTarget target
+                if (typeAnnotation.targetInfo()
+                        instanceof TypeAnnotation.FormalParameterTarget target
                     && target.formalParameterIndex() == parameterIndex) {
                   addTypeAnnotation(rootAnnotations, typeAnnotations, typeAnnotation);
                 }
               }
             });
-    return new AnnotatedTypeUse(descriptor, List.copyOf(rootAnnotations), List.copyOf(typeAnnotations));
+    return new AnnotatedTypeUse(
+        descriptor, List.copyOf(rootAnnotations), List.copyOf(typeAnnotations));
   }
 
   private AnnotatedTypeUse methodReturnTypeUse(MethodModel method) {
@@ -193,12 +202,14 @@ public final class NullnessContractResolver implements ContractResolver {
         .ifPresent(
             attr -> {
               for (TypeAnnotation typeAnnotation : attr.annotations()) {
-                if (typeAnnotation.targetInfo().targetType() == TypeAnnotation.TargetType.METHOD_RETURN) {
+                if (typeAnnotation.targetInfo().targetType()
+                    == TypeAnnotation.TargetType.METHOD_RETURN) {
                   addTypeAnnotation(rootAnnotations, typeAnnotations, typeAnnotation);
                 }
               }
             });
-    return new AnnotatedTypeUse(descriptor, List.copyOf(rootAnnotations), List.copyOf(typeAnnotations));
+    return new AnnotatedTypeUse(
+        descriptor, List.copyOf(rootAnnotations), List.copyOf(typeAnnotations));
   }
 
   private AnnotatedTypeUse invokedMethodTypeUse(
@@ -241,7 +252,8 @@ public final class NullnessContractResolver implements ContractResolver {
                 }
               }
             });
-    return new AnnotatedTypeUse(descriptor, List.copyOf(rootAnnotations), List.copyOf(typeAnnotations));
+    return new AnnotatedTypeUse(
+        descriptor, List.copyOf(rootAnnotations), List.copyOf(typeAnnotations));
   }
 
   private AnnotatedTypeUse localTypeUse(

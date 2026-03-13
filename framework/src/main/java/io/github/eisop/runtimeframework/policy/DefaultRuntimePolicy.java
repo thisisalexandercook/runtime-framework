@@ -128,11 +128,14 @@ public final class DefaultRuntimePolicy implements RuntimePolicy {
   }
 
   private boolean isSameOwner(String ownerInternalName, FlowEvent event) {
-    return ownerInternalName.equals(event.methodContext().classContext().classInfo().internalName());
+    return ownerInternalName.equals(
+        event.methodContext().classContext().classInfo().internalName());
   }
 
   private boolean isCheckedTarget(String ownerInternalName, FlowEvent event) {
-    return isChecked(new ClassInfo(ownerInternalName, event.methodContext().classContext().classInfo().loader(), null));
+    return isChecked(
+        new ClassInfo(
+            ownerInternalName, event.methodContext().classContext().classInfo().loader(), null));
   }
 
   private boolean isUncheckedTarget(String ownerInternalName, FlowEvent event) {

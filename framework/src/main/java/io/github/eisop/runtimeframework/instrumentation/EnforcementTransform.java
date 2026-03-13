@@ -183,8 +183,7 @@ public class EnforcementTransform implements CodeTransform {
     }
   }
 
-  private void handleArrayStore(
-      CodeBuilder b, ArrayStoreInstruction a, BytecodeLocation location) {
+  private void handleArrayStore(CodeBuilder b, ArrayStoreInstruction a, BytecodeLocation location) {
     if (a.opcode() == Opcode.AASTORE) {
       FlowEvent.ArrayStore event =
           new FlowEvent.ArrayStore(
@@ -256,7 +255,8 @@ public class EnforcementTransform implements CodeTransform {
       }
     }
     if (!events.isEmpty()) {
-      emitActions(builder, planner.planMethod(methodContext, events), ActionTiming.METHOD_ENTRY, null);
+      emitActions(
+          builder, planner.planMethod(methodContext, events), ActionTiming.METHOD_ENTRY, null);
     }
   }
 
@@ -299,18 +299,12 @@ public class EnforcementTransform implements CodeTransform {
     }
     for (var requirement : action.contract().requirements()) {
       propertyEmitter.emitCheck(
-          builder,
-          requirement,
-          action.valueAccess(),
-          action.attribution(),
-          action.diagnostic());
+          builder, requirement, action.valueAccess(), action.attribution(), action.diagnostic());
     }
   }
 
   private void emitLegacyCheckAction(
-      CodeBuilder builder,
-      InstrumentationAction.LegacyCheckAction action,
-      FlowEvent event) {
+      CodeBuilder builder, InstrumentationAction.LegacyCheckAction action, FlowEvent event) {
     String diagnosticName = action.diagnostic().displayName();
     switch (action.valueAccess()) {
       case ValueAccess.LocalSlot localSlot -> {
@@ -343,11 +337,15 @@ public class EnforcementTransform implements CodeTransform {
   }
 
   private void emitTopOfStackCheck(
-      CodeBuilder builder, TypeKind type, io.github.eisop.runtimeframework.core.CheckGenerator generator, String diagnosticName) {
+      CodeBuilder builder,
+      TypeKind type,
+      io.github.eisop.runtimeframework.core.CheckGenerator generator,
+      String diagnosticName) {
     switch (type.slotSize()) {
       case 1 -> builder.dup();
       case 2 -> builder.dup2();
-      default -> throw new IllegalStateException("Unsupported stack size for check emission: " + type);
+      default ->
+          throw new IllegalStateException("Unsupported stack size for check emission: " + type);
     }
     generator.generateCheck(builder, type, diagnosticName);
   }

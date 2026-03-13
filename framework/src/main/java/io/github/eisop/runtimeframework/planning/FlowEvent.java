@@ -29,9 +29,7 @@ public sealed interface FlowEvent
   TargetRef target();
 
   record MethodParameter(
-      MethodContext methodContext,
-      BytecodeLocation location,
-      TargetRef.MethodParameter target)
+      MethodContext methodContext, BytecodeLocation location, TargetRef.MethodParameter target)
       implements FlowEvent {
     public MethodParameter {
       Objects.requireNonNull(methodContext, "methodContext");
@@ -108,9 +106,7 @@ public sealed interface FlowEvent
   }
 
   record ArrayLoad(
-      MethodContext methodContext,
-      BytecodeLocation location,
-      TargetRef.ArrayComponent target)
+      MethodContext methodContext, BytecodeLocation location, TargetRef.ArrayComponent target)
       implements FlowEvent {
     public ArrayLoad {
       Objects.requireNonNull(methodContext, "methodContext");
@@ -125,9 +121,7 @@ public sealed interface FlowEvent
   }
 
   record ArrayStore(
-      MethodContext methodContext,
-      BytecodeLocation location,
-      TargetRef.ArrayComponent target)
+      MethodContext methodContext, BytecodeLocation location, TargetRef.ArrayComponent target)
       implements FlowEvent {
     public ArrayStore {
       Objects.requireNonNull(methodContext, "methodContext");
@@ -156,9 +150,7 @@ public sealed interface FlowEvent
   }
 
   record BridgeParameter(
-      MethodContext methodContext,
-      BytecodeLocation location,
-      TargetRef.MethodParameter target)
+      MethodContext methodContext, BytecodeLocation location, TargetRef.MethodParameter target)
       implements FlowEvent {
     public BridgeParameter {
       Objects.requireNonNull(methodContext, "methodContext");
@@ -188,9 +180,7 @@ public sealed interface FlowEvent
   }
 
   record OverrideParameter(
-      MethodContext methodContext,
-      BytecodeLocation location,
-      TargetRef.MethodParameter target)
+      MethodContext methodContext, BytecodeLocation location, TargetRef.MethodParameter target)
       implements FlowEvent {
     public OverrideParameter {
       Objects.requireNonNull(methodContext, "methodContext");

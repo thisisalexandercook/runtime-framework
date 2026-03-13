@@ -5,8 +5,8 @@ import java.lang.classfile.Attributes;
 import java.lang.classfile.MethodModel;
 import java.lang.classfile.Opcode;
 import java.lang.classfile.TypeKind;
-import java.lang.classfile.attribute.StackMapFrameInfo;
 import java.lang.classfile.attribute.CodeAttribute;
+import java.lang.classfile.attribute.StackMapFrameInfo;
 import java.lang.classfile.constantpool.ClassEntry;
 import java.lang.classfile.instruction.ArrayLoadInstruction;
 import java.lang.classfile.instruction.ArrayStoreInstruction;
@@ -77,7 +77,8 @@ final class ReferenceValueTracker {
       return Optional.empty();
     }
 
-    return Optional.of(new TargetRef.ArrayComponent(arrayRef.descriptor(), arrayRef.sourceTarget()));
+    return Optional.of(
+        new TargetRef.ArrayComponent(arrayRef.descriptor(), arrayRef.sourceTarget()));
   }
 
   void acceptInstruction(java.lang.classfile.Instruction instruction) {
@@ -91,18 +92,25 @@ final class ReferenceValueTracker {
         case StoreInstruction store -> simulateStore(store);
         case ConstantInstruction constant -> simulateConstant(constant);
         case FieldInstruction field -> simulateField(field);
-        case InvokeInstruction invoke -> simulateInvoke(invoke.typeSymbol(), hasReceiver(invoke.opcode()), invokeReturnSource(invoke));
-        case InvokeDynamicInstruction invokeDynamic -> simulateInvoke(invokeDynamic.typeSymbol(), false, null);
+        case InvokeInstruction invoke ->
+            simulateInvoke(
+                invoke.typeSymbol(), hasReceiver(invoke.opcode()), invokeReturnSource(invoke));
+        case InvokeDynamicInstruction invokeDynamic ->
+            simulateInvoke(invokeDynamic.typeSymbol(), false, null);
         case ArrayLoadInstruction arrayLoad -> simulateArrayLoad(arrayLoad);
         case ArrayStoreInstruction ignored -> simulateArrayStore();
         case TypeCheckInstruction typeCheck -> simulateTypeCheck(typeCheck);
         case NewObjectInstruction newObject ->
-            currentState.push(TrackedValue.reference(newObject.className().asSymbol().descriptorString(), null));
-        case NewReferenceArrayInstruction newReferenceArray -> simulateNewReferenceArray(newReferenceArray);
-        case NewPrimitiveArrayInstruction newPrimitiveArray -> simulateNewPrimitiveArray(newPrimitiveArray);
+            currentState.push(
+                TrackedValue.reference(newObject.className().asSymbol().descriptorString(), null));
+        case NewReferenceArrayInstruction newReferenceArray ->
+            simulateNewReferenceArray(newReferenceArray);
+        case NewPrimitiveArrayInstruction newPrimitiveArray ->
+            simulateNewPrimitiveArray(newPrimitiveArray);
         case NewMultiArrayInstruction newMultiArray -> simulateNewMultiArray(newMultiArray);
         case ConvertInstruction convert -> simulateConvert(convert);
-        case IncrementInstruction increment -> currentState.store(increment.slot(), TrackedValue.primitive(TypeKind.INT));
+        case IncrementInstruction increment ->
+            currentState.store(increment.slot(), TrackedValue.primitive(TypeKind.INT));
         case OperatorInstruction operator -> simulateOperator(operator);
         case StackInstruction stackInstruction -> simulateStack(stackInstruction.opcode());
         case BranchInstruction branch -> simulateBranch(branch);
@@ -175,8 +183,7 @@ final class ReferenceValueTracker {
   private void simulateField(FieldInstruction field) {
     String descriptor = field.typeSymbol().descriptorString();
     TargetRef.Field sourceTarget =
-        new TargetRef.Field(
-            field.owner().asInternalName(), field.name().stringValue(), descriptor);
+        new TargetRef.Field(field.owner().asInternalName(), field.name().stringValue(), descriptor);
 
     switch (field.opcode()) {
       case GETSTATIC -> currentState.push(TrackedValue.fromDescriptor(descriptor, sourceTarget));
@@ -234,7 +241,8 @@ final class ReferenceValueTracker {
     }
 
     if (typeCheck.opcode() == Opcode.CHECKCAST) {
-      currentState.push(TrackedValue.reference(typeCheck.type().asSymbol().descriptorString(), null));
+      currentState.push(
+          TrackedValue.reference(typeCheck.type().asSymbol().descriptorString(), null));
       return;
     }
 
@@ -280,8 +288,22 @@ final class ReferenceValueTracker {
         currentState.pop();
         currentState.push(TrackedValue.primitive(operator.typeKind()));
       }
-      case IADD, ISUB, IMUL, IDIV, IREM, IAND, IOR, IXOR, ISHL, ISHR, IUSHR,
-          FADD, FSUB, FMUL, FDIV, FREM -> {
+      case IADD,
+          ISUB,
+          IMUL,
+          IDIV,
+          IREM,
+          IAND,
+          IOR,
+          IXOR,
+          ISHL,
+          ISHR,
+          IUSHR,
+          FADD,
+          FSUB,
+          FMUL,
+          FDIV,
+          FREM -> {
         currentState.pop();
         currentState.pop();
         currentState.push(TrackedValue.primitive(operator.typeKind()));
@@ -469,8 +491,14 @@ final class ReferenceValueTracker {
   private void simulateBranch(BranchInstruction branch) {
     switch (branch.opcode()) {
       case IFEQ, IFNE, IFLT, IFGE, IFGT, IFLE, IFNULL, IFNONNULL -> currentState.pop();
-      case IF_ICMPEQ, IF_ICMPNE, IF_ICMPLT, IF_ICMPGE, IF_ICMPGT, IF_ICMPLE,
-          IF_ACMPEQ, IF_ACMPNE -> {
+      case IF_ICMPEQ,
+          IF_ICMPNE,
+          IF_ICMPLT,
+          IF_ICMPGE,
+          IF_ICMPGT,
+          IF_ICMPLE,
+          IF_ACMPEQ,
+          IF_ACMPNE -> {
         currentState.pop();
         currentState.pop();
       }
@@ -526,7 +554,9 @@ final class ReferenceValueTracker {
   }
 
   private TrackedValue componentValue(TrackedValue arrayRef) {
-    if (arrayRef == null || arrayRef.descriptor() == null || !arrayRef.descriptor().startsWith("[")) {
+    if (arrayRef == null
+        || arrayRef.descriptor() == null
+        || !arrayRef.descriptor().startsWith("[")) {
       return TrackedValue.reference(null, null);
     }
 
@@ -607,10 +637,14 @@ final class ReferenceValueTracker {
       StackMapFrameInfo.VerificationTypeInfo typeInfo, String ownerInternalName) {
     return switch (typeInfo) {
       case StackMapFrameInfo.SimpleVerificationTypeInfo.TOP -> null;
-      case StackMapFrameInfo.SimpleVerificationTypeInfo.INTEGER -> TrackedValue.primitive(TypeKind.INT);
-      case StackMapFrameInfo.SimpleVerificationTypeInfo.FLOAT -> TrackedValue.primitive(TypeKind.FLOAT);
-      case StackMapFrameInfo.SimpleVerificationTypeInfo.LONG -> TrackedValue.primitive(TypeKind.LONG);
-      case StackMapFrameInfo.SimpleVerificationTypeInfo.DOUBLE -> TrackedValue.primitive(TypeKind.DOUBLE);
+      case StackMapFrameInfo.SimpleVerificationTypeInfo.INTEGER ->
+          TrackedValue.primitive(TypeKind.INT);
+      case StackMapFrameInfo.SimpleVerificationTypeInfo.FLOAT ->
+          TrackedValue.primitive(TypeKind.FLOAT);
+      case StackMapFrameInfo.SimpleVerificationTypeInfo.LONG ->
+          TrackedValue.primitive(TypeKind.LONG);
+      case StackMapFrameInfo.SimpleVerificationTypeInfo.DOUBLE ->
+          TrackedValue.primitive(TypeKind.DOUBLE);
       case StackMapFrameInfo.SimpleVerificationTypeInfo.NULL -> TrackedValue.reference(null, null);
       case StackMapFrameInfo.SimpleVerificationTypeInfo.UNINITIALIZED_THIS ->
           TrackedValue.reference("L" + ownerInternalName + ";", null);

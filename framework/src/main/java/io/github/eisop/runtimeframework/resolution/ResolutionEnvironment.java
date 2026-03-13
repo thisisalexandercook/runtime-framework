@@ -46,7 +46,8 @@ public interface ResolutionEnvironment {
             model ->
                 model.methods().stream()
                     .filter(method -> method.methodName().stringValue().equals(methodName))
-                    .filter(method -> method.methodTypeSymbol().descriptorString().equals(descriptor))
+                    .filter(
+                        method -> method.methodTypeSymbol().descriptorString().equals(descriptor))
                     .findFirst());
   }
 

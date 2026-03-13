@@ -5,7 +5,6 @@ import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.resolution.ParentMethod;
 import io.github.eisop.runtimeframework.resolution.ResolutionEnvironment;
 import io.github.eisop.runtimeframework.strategy.InstrumentationStrategy;
-import java.lang.classfile.ClassModel;
 import java.lang.classfile.MethodModel;
 import java.lang.classfile.TypeKind;
 import java.lang.reflect.Modifier;
@@ -91,7 +90,8 @@ public final class StrategyBackedEnforcementPlanner implements EnforcementPlanne
     return switch (event) {
       case FlowEvent.MethodParameter methodParameter -> planMethodParameter(methodParameter);
       case FlowEvent.MethodReturn methodReturn -> planMethodReturn(methodReturn);
-      case FlowEvent.BoundaryCallReturn boundaryCallReturn -> planBoundaryCallReturn(boundaryCallReturn);
+      case FlowEvent.BoundaryCallReturn boundaryCallReturn ->
+          planBoundaryCallReturn(boundaryCallReturn);
       case FlowEvent.FieldRead fieldRead -> planFieldRead(fieldRead);
       case FlowEvent.FieldWrite fieldWrite -> planFieldWrite(fieldWrite);
       case FlowEvent.ArrayLoad arrayLoad -> planArrayLoad(arrayLoad);
@@ -109,7 +109,9 @@ public final class StrategyBackedEnforcementPlanner implements EnforcementPlanne
 
   private List<InstrumentationAction> planMethodParameter(FlowEvent.MethodParameter event) {
     TargetRef.MethodParameter target = event.target();
-    TypeKind type = TypeKind.from(target.method().methodTypeSymbol().parameterList().get(target.parameterIndex()));
+    TypeKind type =
+        TypeKind.from(
+            target.method().methodTypeSymbol().parameterList().get(target.parameterIndex()));
     CheckGenerator generator =
         strategy.getParameterCheck(target.method(), target.parameterIndex(), type);
     if (generator == null) {
@@ -266,7 +268,8 @@ public final class StrategyBackedEnforcementPlanner implements EnforcementPlanne
                     + methodContext.methodModel().methodName().stringValue())));
   }
 
-  private CheckGenerator resolveFieldReadGenerator(MethodContext methodContext, TargetRef.Field target) {
+  private CheckGenerator resolveFieldReadGenerator(
+      MethodContext methodContext, TargetRef.Field target) {
     TypeKind type = TypeKind.fromDescriptor(target.descriptor());
     String ownerInternalName = ownerInternalName(methodContext);
     if (target.ownerInternalName().equals(ownerInternalName)) {

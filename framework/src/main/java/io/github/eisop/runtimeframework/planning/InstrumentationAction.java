@@ -1,7 +1,7 @@
 package io.github.eisop.runtimeframework.planning;
 
-import io.github.eisop.runtimeframework.core.CheckGenerator;
 import io.github.eisop.runtimeframework.contracts.ValueContract;
+import io.github.eisop.runtimeframework.core.CheckGenerator;
 import io.github.eisop.runtimeframework.runtime.AttributionKind;
 import java.lang.classfile.TypeKind;
 import java.util.Objects;

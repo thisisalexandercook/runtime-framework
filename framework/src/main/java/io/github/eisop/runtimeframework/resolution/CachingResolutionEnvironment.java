@@ -25,7 +25,8 @@ final class CachingResolutionEnvironment implements ResolutionEnvironment {
     }
 
     CacheKey cacheKey = new CacheKey(internalName, loader);
-    return classCache.computeIfAbsent(cacheKey, key -> readClassModel(key.internalName(), key.loader()));
+    return classCache.computeIfAbsent(
+        cacheKey, key -> readClassModel(key.internalName(), key.loader()));
   }
 
   @Override
@@ -42,7 +43,8 @@ final class CachingResolutionEnvironment implements ResolutionEnvironment {
                           for (TypeAnnotation typeAnnotation : attr.annotations()) {
                             if (typeAnnotation.targetInfo()
                                 instanceof TypeAnnotation.LocalVarTarget localVarTarget) {
-                              for (TypeAnnotation.LocalVarTargetInfo info : localVarTarget.table()) {
+                              for (TypeAnnotation.LocalVarTargetInfo info :
+                                  localVarTarget.table()) {
                                 if (info.index() == slot) {
                                   result.add(
                                       new LocalVariableTypeAnnotation(
