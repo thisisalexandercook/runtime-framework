@@ -30,6 +30,14 @@ public class NullnessDirectoryTest extends RuntimeTestRunner {
   }
 
   @Test
+  public void testArrayScenarios() throws Exception {
+    runDirectoryTest(
+        "nullness-array",
+        "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker",
+        false);
+  }
+
+  @Test
   public void testFieldWriteScenarios() throws Exception {
     runDirectoryTest(
         "nullness-field-write",
