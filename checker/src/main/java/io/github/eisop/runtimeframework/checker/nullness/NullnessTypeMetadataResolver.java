@@ -77,7 +77,8 @@ public final class NullnessTypeMetadataResolver implements TypeMetadataResolver 
       case TargetRef.MethodReturn methodReturn -> methodReturnTypeUse(methodReturn.method());
       case TargetRef.InvokedMethod invokedMethod -> invokedMethodTypeUse(invokedMethod, context);
       case TargetRef.Field field -> fieldTypeUse(field, context);
-      case TargetRef.ArrayComponent arrayComponent -> arrayComponentTypeUse(arrayComponent, context);
+      case TargetRef.ArrayComponent arrayComponent ->
+          arrayComponentTypeUse(arrayComponent, context);
       case TargetRef.Local local -> localTypeUse(local, descriptorHint, context);
       case TargetRef.Receiver receiver ->
           TypeUseMetadata.empty("L" + receiver.ownerInternalName() + ";");
@@ -98,7 +99,8 @@ public final class NullnessTypeMetadataResolver implements TypeMetadataResolver 
             attr -> {
               var all = attr.parameterAnnotations();
               if (parameterIndex < all.size()) {
-                all.get(parameterIndex).forEach(annotation -> addRootQualifier(qualifiers, annotation));
+                all.get(parameterIndex)
+                    .forEach(annotation -> addRootQualifier(qualifiers, annotation));
               }
             });
     method
@@ -125,7 +127,9 @@ public final class NullnessTypeMetadataResolver implements TypeMetadataResolver 
     List<TypeUseQualifier> qualifiers = new ArrayList<>();
     method
         .findAttribute(Attributes.runtimeVisibleAnnotations())
-        .ifPresent(attr -> attr.annotations().forEach(annotation -> addRootQualifier(qualifiers, annotation)));
+        .ifPresent(
+            attr ->
+                attr.annotations().forEach(annotation -> addRootQualifier(qualifiers, annotation)));
     method
         .findAttribute(Attributes.runtimeVisibleTypeAnnotations())
         .ifPresent(
@@ -179,7 +183,9 @@ public final class NullnessTypeMetadataResolver implements TypeMetadataResolver 
     List<TypeUseQualifier> qualifiers = new ArrayList<>();
     field
         .findAttribute(Attributes.runtimeVisibleAnnotations())
-        .ifPresent(attr -> attr.annotations().forEach(annotation -> addRootQualifier(qualifiers, annotation)));
+        .ifPresent(
+            attr ->
+                attr.annotations().forEach(annotation -> addRootQualifier(qualifiers, annotation)));
     field
         .findAttribute(Attributes.runtimeVisibleTypeAnnotations())
         .ifPresent(

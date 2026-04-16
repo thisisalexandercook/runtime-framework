@@ -6,9 +6,7 @@ import java.util.Objects;
 
 /** A checker-relevant qualifier applied at a particular type-use path. */
 public record TypeUseQualifier(
-    String descriptor,
-    List<TypeAnnotation.TypePathComponent> targetPath,
-    boolean defaulted) {
+    String descriptor, List<TypeAnnotation.TypePathComponent> targetPath, boolean defaulted) {
 
   public TypeUseQualifier {
     Objects.requireNonNull(descriptor, "descriptor");

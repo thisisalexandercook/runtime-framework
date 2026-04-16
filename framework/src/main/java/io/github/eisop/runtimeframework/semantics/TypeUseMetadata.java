@@ -32,8 +32,7 @@ public record TypeUseMetadata(String descriptor, List<TypeUseQualifier> qualifie
   public TypeUseMetadata withRootQualifier(String qualifierDescriptor, boolean defaulted) {
     return new TypeUseMetadata(
         descriptor,
-        append(
-            qualifiers, new TypeUseQualifier(qualifierDescriptor, List.of(), defaulted)));
+        append(qualifiers, new TypeUseQualifier(qualifierDescriptor, List.of(), defaulted)));
   }
 
   public TypeUseMetadata arrayComponent() {

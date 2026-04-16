@@ -6,8 +6,7 @@ import java.util.Objects;
 
 /** A concrete action emitted by the planner for later bytecode instrumentation. */
 public sealed interface InstrumentationAction
-    permits InstrumentationAction.ValueCheckAction,
-        InstrumentationAction.LifecycleHookAction {
+    permits InstrumentationAction.ValueCheckAction, InstrumentationAction.LifecycleHookAction {
 
   InjectionPoint injectionPoint();
 
