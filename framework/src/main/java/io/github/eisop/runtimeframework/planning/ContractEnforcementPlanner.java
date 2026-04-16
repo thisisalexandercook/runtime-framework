@@ -17,14 +17,14 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-/** Planner implementation backed by checker-owned semantic contract resolution. */
-public final class SemanticsBackedEnforcementPlanner implements EnforcementPlanner {
+/** Planner implementation that resolves checker contracts into enforcement actions. */
+public final class ContractEnforcementPlanner implements EnforcementPlanner {
 
   private final RuntimePolicy policy;
   private final ContractResolver contracts;
   private final ResolutionEnvironment resolutionEnvironment;
 
-  public SemanticsBackedEnforcementPlanner(
+  public ContractEnforcementPlanner(
       RuntimePolicy policy,
       CheckerSemantics semantics,
       ResolutionEnvironment resolutionEnvironment) {

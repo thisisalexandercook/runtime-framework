@@ -2,14 +2,12 @@ package io.github.eisop.runtimeframework.core;
 
 import io.github.eisop.runtimeframework.instrumentation.EnforcementInstrumenter;
 import io.github.eisop.runtimeframework.instrumentation.RuntimeInstrumenter;
-import io.github.eisop.runtimeframework.planning.SemanticsBackedEnforcementPlanner;
+import io.github.eisop.runtimeframework.planning.ContractEnforcementPlanner;
 import io.github.eisop.runtimeframework.policy.RuntimePolicy;
 import io.github.eisop.runtimeframework.resolution.BytecodeHierarchyResolver;
 import io.github.eisop.runtimeframework.resolution.HierarchyResolver;
 import io.github.eisop.runtimeframework.resolution.ResolutionEnvironment;
 import io.github.eisop.runtimeframework.semantics.CheckerSemantics;
-import io.github.eisop.runtimeframework.strategy.BoundaryStrategy;
-import io.github.eisop.runtimeframework.strategy.InstrumentationStrategy;
 
 /**
  * Represents a specific type system or check to be enforced (e.g., Nullness, Immutability). This
@@ -33,7 +31,7 @@ public abstract class RuntimeChecker {
     HierarchyResolver resolver =
         new BytecodeHierarchyResolver(info -> policy.isChecked(info), resolutionEnvironment);
     return new EnforcementInstrumenter(
-        new SemanticsBackedEnforcementPlanner(policy, semantics, resolutionEnvironment),
+        new ContractEnforcementPlanner(policy, semantics, resolutionEnvironment),
         resolver,
         semantics.emitter());
   }
@@ -45,24 +43,5 @@ public abstract class RuntimeChecker {
   @Deprecated
   public RuntimeInstrumenter getInstrumenter(RuntimePolicy policy) {
     return createInstrumenter(policy);
-  }
-
-  /**
-   * Helper method to create the instrumentation strategy based on the active policy.
-   *
-   * @param config The TypeSystemConfiguration for this checker.
-   * @param policy The active runtime policy.
-   * @return A configured InstrumentationStrategy.
-   */
-  protected InstrumentationStrategy createStrategy(
-      TypeSystemConfiguration config, RuntimePolicy policy) {
-    return createStrategy(config, policy, ResolutionEnvironment.system());
-  }
-
-  protected InstrumentationStrategy createStrategy(
-      TypeSystemConfiguration config,
-      RuntimePolicy policy,
-      ResolutionEnvironment resolutionEnvironment) {
-    return new BoundaryStrategy(config, policy, resolutionEnvironment);
   }
 }

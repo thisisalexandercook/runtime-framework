@@ -255,8 +255,7 @@ public class EnforcementTransform implements CodeTransform {
       }
     }
     if (!events.isEmpty()) {
-      emitActions(
-          builder, planner.planMethod(methodContext, events), ActionTiming.METHOD_ENTRY, null);
+      emitActions(builder, planner.planMethod(methodContext, events), ActionTiming.METHOD_ENTRY);
     }
   }
 
@@ -269,22 +268,19 @@ public class EnforcementTransform implements CodeTransform {
   }
 
   private void emitPlannedActions(CodeBuilder builder, FlowEvent event, ActionTiming timing) {
-    emitActions(builder, planner.planMethod(methodContext, List.of(event)), timing, event);
+    emitActions(builder, planner.planMethod(methodContext, List.of(event)), timing);
   }
 
-  private void emitActions(
-      CodeBuilder builder, MethodPlan plan, ActionTiming timing, FlowEvent event) {
+  private void emitActions(CodeBuilder builder, MethodPlan plan, ActionTiming timing) {
     for (InstrumentationAction action : plan.actions()) {
       if (timing.matches(action)) {
-        emitAction(builder, action, event);
+        emitAction(builder, action);
       }
     }
   }
 
-  private void emitAction(CodeBuilder builder, InstrumentationAction action, FlowEvent event) {
+  private void emitAction(CodeBuilder builder, InstrumentationAction action) {
     switch (action) {
-      case InstrumentationAction.LegacyCheckAction legacyCheckAction ->
-          emitLegacyCheckAction(builder, legacyCheckAction, event);
       case InstrumentationAction.ValueCheckAction valueCheckAction ->
           emitValueCheckAction(builder, valueCheckAction);
       case InstrumentationAction.LifecycleHookAction ignored ->
@@ -300,83 +296,6 @@ public class EnforcementTransform implements CodeTransform {
     for (var requirement : action.contract().requirements()) {
       propertyEmitter.emitCheck(
           builder, requirement, action.valueAccess(), action.attribution(), action.diagnostic());
-    }
-  }
-
-  private void emitLegacyCheckAction(
-      CodeBuilder builder, InstrumentationAction.LegacyCheckAction action, FlowEvent event) {
-    String diagnosticName = action.diagnostic().displayName();
-    switch (action.valueAccess()) {
-      case ValueAccess.LocalSlot localSlot -> {
-        loadLocal(builder, action.valueType(), localSlot.slot());
-        action.generator().generateCheck(builder, action.valueType(), diagnosticName);
-      }
-      case ValueAccess.ThisReference ignored -> {
-        builder.aload(0);
-        action.generator().generateCheck(builder, action.valueType(), diagnosticName);
-      }
-      case ValueAccess.OperandStack operandStack -> {
-        if (operandStack.depthFromTop() != 0) {
-          throw new IllegalStateException("Only top-of-stack access is currently supported");
-        }
-        if (event instanceof FlowEvent.FieldWrite fieldWrite) {
-          emitFieldWriteStackCheck(
-              builder,
-              action.valueType(),
-              action.generator(),
-              diagnosticName,
-              fieldWrite.isStaticAccess());
-        } else {
-          emitTopOfStackCheck(builder, action.valueType(), action.generator(), diagnosticName);
-        }
-      }
-      case ValueAccess.FieldWriteValue ignored ->
-          throw new IllegalStateException(
-              "Legacy check actions do not support planner-native field-write access");
-    }
-  }
-
-  private void emitTopOfStackCheck(
-      CodeBuilder builder,
-      TypeKind type,
-      io.github.eisop.runtimeframework.core.CheckGenerator generator,
-      String diagnosticName) {
-    switch (type.slotSize()) {
-      case 1 -> builder.dup();
-      case 2 -> builder.dup2();
-      default ->
-          throw new IllegalStateException("Unsupported stack size for check emission: " + type);
-    }
-    generator.generateCheck(builder, type, diagnosticName);
-  }
-
-  private void emitFieldWriteStackCheck(
-      CodeBuilder builder,
-      TypeKind type,
-      io.github.eisop.runtimeframework.core.CheckGenerator generator,
-      String diagnosticName,
-      boolean isStaticAccess) {
-    if (isStaticAccess) {
-      emitTopOfStackCheck(builder, type, generator, diagnosticName);
-      return;
-    }
-
-    if (type.slotSize() != 1) {
-      throw new IllegalStateException("PUTFIELD check currently expects a single-slot value");
-    }
-    builder.dup_x1();
-    generator.generateCheck(builder, type, diagnosticName);
-    builder.swap();
-  }
-
-  private void loadLocal(CodeBuilder builder, TypeKind type, int slot) {
-    switch (type) {
-      case INT, BYTE, CHAR, SHORT, BOOLEAN -> builder.iload(slot);
-      case LONG -> builder.lload(slot);
-      case FLOAT -> builder.fload(slot);
-      case DOUBLE -> builder.dload(slot);
-      case REFERENCE -> builder.aload(slot);
-      default -> throw new IllegalArgumentException("Unsupported local load type: " + type);
     }
   }
 

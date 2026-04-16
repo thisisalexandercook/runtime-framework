@@ -5,13 +5,10 @@ import io.github.eisop.runtimeframework.planning.BridgePlan;
 import io.github.eisop.runtimeframework.planning.ClassContext;
 import io.github.eisop.runtimeframework.planning.EnforcementPlanner;
 import io.github.eisop.runtimeframework.planning.InstrumentationAction;
-import io.github.eisop.runtimeframework.planning.StrategyBackedEnforcementPlanner;
-import io.github.eisop.runtimeframework.planning.ValueAccess;
 import io.github.eisop.runtimeframework.policy.ClassClassification;
 import io.github.eisop.runtimeframework.resolution.HierarchyResolver;
 import io.github.eisop.runtimeframework.resolution.ParentMethod;
 import io.github.eisop.runtimeframework.semantics.PropertyEmitter;
-import io.github.eisop.runtimeframework.strategy.InstrumentationStrategy;
 import java.lang.classfile.ClassBuilder;
 import java.lang.classfile.ClassModel;
 import java.lang.classfile.CodeBuilder;
@@ -28,11 +25,6 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
   private final EnforcementPlanner planner;
   private final HierarchyResolver hierarchyResolver;
   private final PropertyEmitter propertyEmitter;
-
-  public EnforcementInstrumenter(
-      InstrumentationStrategy strategy, HierarchyResolver hierarchyResolver) {
-    this(new StrategyBackedEnforcementPlanner(strategy), hierarchyResolver, null);
-  }
 
   public EnforcementInstrumenter(EnforcementPlanner planner, HierarchyResolver hierarchyResolver) {
     this(planner, hierarchyResolver, null);
@@ -116,8 +108,6 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
 
   private void emitBridgeAction(CodeBuilder builder, InstrumentationAction action) {
     switch (action) {
-      case InstrumentationAction.LegacyCheckAction legacyCheckAction ->
-          emitLegacyBridgeCheck(builder, legacyCheckAction);
       case InstrumentationAction.ValueCheckAction valueCheckAction ->
           emitValueCheckAction(builder, valueCheckAction);
       case InstrumentationAction.LifecycleHookAction ignored ->
@@ -134,41 +124,6 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
       propertyEmitter.emitCheck(
           builder, requirement, action.valueAccess(), action.attribution(), action.diagnostic());
     }
-  }
-
-  private void emitLegacyBridgeCheck(
-      CodeBuilder builder, InstrumentationAction.LegacyCheckAction action) {
-    String diagnosticName = action.diagnostic().displayName();
-    switch (action.valueAccess()) {
-      case ValueAccess.LocalSlot localSlot -> {
-        loadLocal(builder, action.valueType(), localSlot.slot());
-        action.generator().generateCheck(builder, action.valueType(), diagnosticName);
-      }
-      case ValueAccess.ThisReference ignored -> {
-        builder.aload(0);
-        action.generator().generateCheck(builder, action.valueType(), diagnosticName);
-      }
-      case ValueAccess.OperandStack operandStack -> {
-        if (operandStack.depthFromTop() != 0) {
-          throw new IllegalStateException("Only top-of-stack access is currently supported");
-        }
-        emitTopOfStackCheck(builder, action.valueType(), action);
-      }
-      case ValueAccess.FieldWriteValue ignored ->
-          throw new IllegalStateException(
-              "Legacy bridge actions do not support planner-native field-write access");
-    }
-  }
-
-  private void emitTopOfStackCheck(
-      CodeBuilder builder, TypeKind type, InstrumentationAction.LegacyCheckAction action) {
-    switch (type.slotSize()) {
-      case 1 -> builder.dup();
-      case 2 -> builder.dup2();
-      default ->
-          throw new IllegalStateException("Unsupported stack size for check emission: " + type);
-    }
-    action.generator().generateCheck(builder, type, action.diagnostic().displayName());
   }
 
   private void loadLocal(CodeBuilder b, TypeKind type, int slot) {
