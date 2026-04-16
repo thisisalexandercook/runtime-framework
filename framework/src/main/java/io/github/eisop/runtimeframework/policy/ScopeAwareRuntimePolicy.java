@@ -7,8 +7,8 @@ import io.github.eisop.runtimeframework.planning.FlowEvent;
 import io.github.eisop.runtimeframework.resolution.ResolutionEnvironment;
 import java.lang.classfile.ClassModel;
 
-/** Default policy implementation for checked-scope and global-mode behavior. */
-public final class DefaultRuntimePolicy implements RuntimePolicy {
+/** Runtime policy implementation for checked-scope and global-mode behavior. */
+public final class ScopeAwareRuntimePolicy implements RuntimePolicy {
 
   private final Filter<ClassInfo> instrumentationSafetyFilter;
   private final Filter<ClassInfo> checkedScopeFilter;
@@ -16,7 +16,7 @@ public final class DefaultRuntimePolicy implements RuntimePolicy {
   private final boolean trustAnnotatedFor;
   private final AnnotatedForFilter annotatedForFilter;
 
-  public DefaultRuntimePolicy(
+  public ScopeAwareRuntimePolicy(
       Filter<ClassInfo> instrumentationSafetyFilter,
       Filter<ClassInfo> checkedScopeFilter,
       boolean isGlobalMode,
@@ -31,7 +31,7 @@ public final class DefaultRuntimePolicy implements RuntimePolicy {
         ResolutionEnvironment.system());
   }
 
-  public DefaultRuntimePolicy(
+  public ScopeAwareRuntimePolicy(
       Filter<ClassInfo> instrumentationSafetyFilter,
       Filter<ClassInfo> checkedScopeFilter,
       boolean isGlobalMode,

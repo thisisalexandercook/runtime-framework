@@ -7,6 +7,10 @@ public interface CheckerSemantics {
 
   PropertyEmitter emitter();
 
+  default TypeMetadataResolver typeMetadata() {
+    return TypeMetadataResolver.none();
+  }
+
   default LifecycleSemantics lifecycle() {
     return LifecycleSemantics.none();
   }

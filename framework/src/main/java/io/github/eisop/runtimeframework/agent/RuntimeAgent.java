@@ -5,8 +5,8 @@ import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.filter.ClassListFilter;
 import io.github.eisop.runtimeframework.filter.Filter;
 import io.github.eisop.runtimeframework.filter.FrameworkSafetyFilter;
-import io.github.eisop.runtimeframework.policy.DefaultRuntimePolicy;
 import io.github.eisop.runtimeframework.policy.RuntimePolicy;
+import io.github.eisop.runtimeframework.policy.ScopeAwareRuntimePolicy;
 import io.github.eisop.runtimeframework.resolution.ResolutionEnvironment;
 import io.github.eisop.runtimeframework.runtime.RuntimeVerifier;
 import io.github.eisop.runtimeframework.runtime.ViolationHandler;
@@ -59,7 +59,7 @@ public final class RuntimeAgent {
     }
 
     RuntimePolicy policy =
-        new DefaultRuntimePolicy(
+        new ScopeAwareRuntimePolicy(
             safeFilter,
             checkedScopeFilter,
             isGlobalMode,
