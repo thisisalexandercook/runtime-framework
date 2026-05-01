@@ -211,7 +211,8 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
         classModel.fields().stream()
             .anyMatch(
                 field ->
-                    field.fieldName()
+                    field
+                        .fieldName()
                         .stringValue()
                         .equals(BoundaryBootstraps.CHECKED_CLASS_MARKER));
     if (!markerExists) {
