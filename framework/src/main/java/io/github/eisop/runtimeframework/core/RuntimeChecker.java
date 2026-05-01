@@ -33,7 +33,9 @@ public abstract class RuntimeChecker {
     return new EnforcementInstrumenter(
         new ContractEnforcementPlanner(policy, semantics, resolutionEnvironment),
         resolver,
-        semantics.emitter());
+        semantics.emitter(),
+        policy,
+        resolutionEnvironment);
   }
 
   /**

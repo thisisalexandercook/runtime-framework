@@ -10,6 +10,9 @@ import io.github.eisop.runtimeframework.planning.MethodContext;
 import io.github.eisop.runtimeframework.planning.MethodPlan;
 import io.github.eisop.runtimeframework.planning.TargetRef;
 import io.github.eisop.runtimeframework.policy.ClassClassification;
+import io.github.eisop.runtimeframework.policy.RuntimePolicy;
+import io.github.eisop.runtimeframework.resolution.ResolutionEnvironment;
+import io.github.eisop.runtimeframework.runtime.BoundaryBootstraps;
 import io.github.eisop.runtimeframework.semantics.PropertyEmitter;
 import java.lang.classfile.ClassModel;
 import java.lang.classfile.CodeBuilder;
@@ -25,6 +28,11 @@ import java.lang.classfile.instruction.InvokeInstruction;
 import java.lang.classfile.instruction.LineNumber;
 import java.lang.classfile.instruction.ReturnInstruction;
 import java.lang.classfile.instruction.StoreInstruction;
+import java.lang.constant.ClassDesc;
+import java.lang.constant.ConstantDescs;
+import java.lang.constant.DirectMethodHandleDesc;
+import java.lang.constant.DynamicCallSiteDesc;
+import java.lang.constant.MethodHandleDesc;
 import java.lang.constant.MethodTypeDesc;
 import java.util.ArrayList;
 import java.util.List;
@@ -36,10 +44,30 @@ public class EnforcementTransform implements CodeTransform {
   private final PropertyEmitter propertyEmitter;
   private final MethodContext methodContext;
   private final boolean isCheckedScope;
+  private final RuntimePolicy policy;
+  private final ResolutionEnvironment resolutionEnvironment;
+  private final boolean enableIndyBoundary;
+  private final boolean emitEntryChecks;
   private final ReferenceValueTracker valueTracker;
   private boolean entryChecksEmitted;
   private int currentBytecodeOffset;
   private int currentSourceLine;
+  private static final ClassDesc BOUNDARY_BOOTSTRAPS =
+      ClassDesc.of(BoundaryBootstraps.class.getName());
+  private static final DirectMethodHandleDesc CHECKED_VIRTUAL_BOOTSTRAP =
+      MethodHandleDesc.ofMethod(
+          DirectMethodHandleDesc.Kind.STATIC,
+          BOUNDARY_BOOTSTRAPS,
+          "checkedVirtual",
+          MethodTypeDesc.of(
+              ConstantDescs.CD_CallSite,
+              ConstantDescs.CD_MethodHandles_Lookup,
+              ConstantDescs.CD_String,
+              ConstantDescs.CD_MethodType,
+              ConstantDescs.CD_Class,
+              ConstantDescs.CD_String,
+              ConstantDescs.CD_String,
+              ConstantDescs.CD_MethodType));
 
   public EnforcementTransform(
       EnforcementPlanner planner,
@@ -48,6 +76,52 @@ public class EnforcementTransform implements CodeTransform {
       MethodModel methodModel,
       boolean isCheckedScope,
       ClassLoader loader) {
+    this(
+        planner,
+        propertyEmitter,
+        classModel,
+        methodModel,
+        isCheckedScope,
+        loader,
+        null,
+        ResolutionEnvironment.system(),
+        false);
+  }
+
+  public EnforcementTransform(
+      EnforcementPlanner planner,
+      PropertyEmitter propertyEmitter,
+      ClassModel classModel,
+      MethodModel methodModel,
+      boolean isCheckedScope,
+      ClassLoader loader,
+      RuntimePolicy policy,
+      ResolutionEnvironment resolutionEnvironment,
+      boolean enableIndyBoundary) {
+    this(
+        planner,
+        propertyEmitter,
+        classModel,
+        methodModel,
+        isCheckedScope,
+        loader,
+        policy,
+        resolutionEnvironment,
+        enableIndyBoundary,
+        true);
+  }
+
+  public EnforcementTransform(
+      EnforcementPlanner planner,
+      PropertyEmitter propertyEmitter,
+      ClassModel classModel,
+      MethodModel methodModel,
+      boolean isCheckedScope,
+      ClassLoader loader,
+      RuntimePolicy policy,
+      ResolutionEnvironment resolutionEnvironment,
+      boolean enableIndyBoundary,
+      boolean emitEntryChecks) {
     this.planner = planner;
     this.propertyEmitter = propertyEmitter;
     ClassContext classContext =
@@ -57,6 +131,10 @@ public class EnforcementTransform implements CodeTransform {
             isCheckedScope ? ClassClassification.CHECKED : ClassClassification.UNCHECKED);
     this.methodContext = new MethodContext(classContext, methodModel);
     this.isCheckedScope = isCheckedScope;
+    this.policy = policy;
+    this.resolutionEnvironment = resolutionEnvironment;
+    this.enableIndyBoundary = enableIndyBoundary;
+    this.emitEntryChecks = emitEntryChecks;
     this.valueTracker = new ReferenceValueTracker(ownerInternalName(), methodModel);
     this.entryChecksEmitted = false;
     this.currentBytecodeOffset = 0;
@@ -98,6 +176,10 @@ public class EnforcementTransform implements CodeTransform {
   }
 
   private boolean maybeEmitEntryChecks(CodeBuilder builder, CodeElement element) {
+    if (!emitEntryChecks) {
+      return false;
+    }
+
     if (entryChecksEmitted) {
       return false;
     }
@@ -169,7 +251,10 @@ public class EnforcementTransform implements CodeTransform {
   }
 
   private void handleInvoke(CodeBuilder b, InvokeInstruction i, BytecodeLocation location) {
-    b.with(i);
+    boolean rewritten = maybeEmitIndyBoundaryCall(b, i);
+    if (!rewritten) {
+      b.with(i);
+    }
     if (isCheckedScope) {
       FlowEvent.BoundaryCallReturn event =
           new FlowEvent.BoundaryCallReturn(
@@ -179,6 +264,53 @@ public class EnforcementTransform implements CodeTransform {
                   i.owner().asInternalName(), i.name().stringValue(), i.typeSymbol()));
       emitPlannedActions(b, event, ActionTiming.AFTER_INSTRUCTION);
     }
+  }
+
+  private boolean maybeEmitIndyBoundaryCall(CodeBuilder builder, InvokeInstruction instruction) {
+    if (!enableIndyBoundary
+        || !isCheckedScope
+        || policy == null
+        || instruction.opcode() != Opcode.INVOKEVIRTUAL) {
+      return false;
+    }
+
+    String methodName = instruction.name().stringValue();
+    if (methodName.equals("<init>") || methodName.contains("$runtimeframework$safe")) {
+      return false;
+    }
+
+    String ownerInternalName = instruction.owner().asInternalName();
+    ClassInfo ownerInfo =
+        new ClassInfo(ownerInternalName, methodContext.classContext().classInfo().loader(), null);
+    if (!policy.isChecked(ownerInfo)) {
+      return false;
+    }
+
+    boolean targetHasSafeBody =
+        resolutionEnvironment
+            .findDeclaredMethod(
+                ownerInternalName,
+                methodName,
+                instruction.typeSymbol().descriptorString(),
+                methodContext.classContext().classInfo().loader())
+            .filter(EnforcementInstrumenter::isSplitCandidate)
+            .isPresent();
+    if (!targetHasSafeBody) {
+      return false;
+    }
+
+    ClassDesc ownerDesc = ClassDesc.ofInternalName(ownerInternalName);
+    MethodTypeDesc invocationType = instruction.typeSymbol().insertParameterTypes(0, ownerDesc);
+    builder.invokedynamic(
+        DynamicCallSiteDesc.of(
+            CHECKED_VIRTUAL_BOOTSTRAP,
+            methodName,
+            invocationType,
+            ownerDesc,
+            methodName,
+            EnforcementInstrumenter.safeMethodName(methodName),
+            instruction.typeSymbol()));
+    return true;
   }
 
   private void handleArrayStore(CodeBuilder b, ArrayStoreInstruction a, BytecodeLocation location) {

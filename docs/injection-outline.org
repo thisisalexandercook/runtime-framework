@@ -1,0 +1,60 @@
+| Check                                       | Flow event              | Injection point               | Injected when                              | Blame    |
+|---------------------------------------------+-------------------------+-------------------------------+--------------------------------------------+----------|
+| Checked method parameter                    | =MethodParameter=       | method entry                  | Enclosing class is checked                 | =CALLER= |
+| Checked method return                       | =MethodReturn=          | before normal return          | Enclosing class is checked                 | =LOCAL=  |
+| Checked caller receives unchecked return    | =BoundaryCallReturn=    | after invoke                  | Checked caller invokes unchecked owner     | =LOCAL=  |
+| Checked method field read                   | =FieldRead=             | after =GETFIELD=/=GETSTATIC=  | Checked method reads same/unchecked owner  | =LOCAL=  |
+| Write into checked field                    | =FieldWrite=            | before =PUTFIELD=/=PUTSTATIC= | Global mode writes into checked owner      | =LOCAL=  |
+| Checked method array load                   | =ArrayLoad=             | after =AALOAD=                | Enclosing method is checked                | =LOCAL=  |
+| Array store                                 | =ArrayStore=            | before =AASTORE=              | Any transformed class                      | =LOCAL=  |
+| Checked local reference store               | =LocalStore=            | before =ASTORE=               | Enclosing method is checked                | =LOCAL=  |
+| Synthetic inherited-method bridge parameter | bridge parameter action | bridge entry                  | Checked class inherits unchecked method    | =CALLER= |
+| Synthetic inherited-method bridge return    | bridge return action    | bridge exit                   | Checked class inherits unchecked method    | =CALLER= |
+| Unchecked override parameter                | =OverrideParameter=     | method entry                  | Global mode, unchecked override of checked | =CALLER= |
+| Unchecked override return                   | =OverrideReturn=        | before normal return          | Global mode, unchecked override of checked | =LOCAL=  |
+
+* First invokedynamic experiment: checked parameter boundary elision
+
+| Scenario                                  | What we instrument                   | What happens                                               |
+|-------------------------------------------+--------------------------------------+------------------------------------------------------------|
+| Checked caller -> checked receiver        | Rewrite call site to =invokedynamic= | Indy calls the checked receiver's safe body                |
+| Checked caller -> unchecked receiver      | Rewrite call site to =invokedynamic= | Indy calls the original method and applies return checks   |
+| Unchecked caller -> checked receiver      | Do not rewrite call site             | Normal dispatch reaches the public wrapper; params checked |
+| Unchecked caller -> unchecked receiver    | Do not rewrite call site             | Normal dispatch runs as today                             |
+| Uninstrumented caller -> checked receiver | Cannot rewrite call site             | Normal dispatch reaches the public wrapper; params checked |
+| Checked static/final/private call         | Leave alone for first experiment     | No dynamic dispatch; direct safe calls can come later      |
+| Constructor call                          | Leave unchanged                      | Constructor/object initialization rules stay untouched     |
+
+* invoke dynamic
+
+the invoke dynamic instrcution has the following pattern:
+
+invokedynamic process:(LCheckedService;Ljava/lang/String;)V
+
+
+Here, process is the call-site name, and the call-site descriptor explicitly includes the static receiver type as its first parameter. In this example, the call site has type:
+
+(CheckedService, String) -> void
+invokevirtual CheckedService.process:(Ljava/lang/String;)V
+
+This differs from an invokevirtual call:
+
+invokevirtual CheckedService.process:(Ljava/lang/String;)V
+
+In the invokevirtual case, the receiver type is encoded in the symbolic method reference owner, CheckedService, and is omitted from the method descriptor itself.
+
+The descriptor only lists the ordinary method parameters:
+
+    (String) -> void
+
+However, both instructions consume the same runtime values from the operand stack. Just before the call, the stack has the shape:
+    ...
+    receiver
+    arg1
+    arg2
+    ...
+    argk
+
+where argk is at the top of the stack.
+
+An invokevirtual instruction refers to a symbolic method reference, consisting of an owner class, method name, and method descriptor. By contrast, an invokedynamic instruction describes a dynamic call site, consisting of a bootstrap method, a call-site name, a call-site descriptor, and optional static bootstrap arguments. The bootstrap method is responsible for linking the call site to an actual target.
