@@ -448,14 +448,12 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
   static boolean isSplitCandidate(MethodModel method) {
     String methodName = method.methodName().stringValue();
     int flags = method.flags().flagsMask();
-    boolean isStatic = Modifier.isStatic(flags);
     return method.code().isPresent()
         && !methodName.equals("<init>")
         && !methodName.equals("<clinit>")
         && !methodName.contains("$runtimeframework$safe")
         && Modifier.isPublic(flags)
         && !Modifier.isPrivate(flags)
-        && (isStatic || !Modifier.isFinal(flags))
         && !Modifier.isSynchronized(flags)
         && !Modifier.isNative(flags)
         && !Modifier.isAbstract(flags)
