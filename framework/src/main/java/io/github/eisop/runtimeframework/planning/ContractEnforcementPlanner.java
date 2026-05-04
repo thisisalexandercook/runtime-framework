@@ -54,6 +54,21 @@ public final class ContractEnforcementPlanner implements EnforcementPlanner {
   }
 
   @Override
+  public MethodPlan planUncheckedReceiverFallbackReturn(
+      MethodContext methodContext, BytecodeLocation location, TargetRef.InvokedMethod target) {
+    ResolutionContext resolutionContext =
+        ResolutionContext.forMethod(methodContext, resolutionEnvironment);
+    return new MethodPlan(
+        planResolvedTarget(
+            target,
+            resolutionContext,
+            InjectionPoint.afterInstruction(location.bytecodeIndex()),
+            new ValueAccess.OperandStack(0),
+            AttributionKind.LOCAL,
+            DiagnosticSpec.of("Return value of " + target.methodName() + " (Boundary)")));
+  }
+
+  @Override
   public BridgePlan planBridge(ClassContext classContext, ParentMethod parentMethod) {
     ResolutionContext resolutionContext =
         ResolutionContext.forClass(classContext, resolutionEnvironment);

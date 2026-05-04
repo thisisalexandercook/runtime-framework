@@ -49,6 +49,7 @@ public class EnforcementTransform implements CodeTransform {
   private final ResolutionEnvironment resolutionEnvironment;
   private final boolean enableIndyBoundary;
   private final boolean emitEntryChecks;
+  private final IndyReturnCheckRegistry returnCheckRegistry;
   private final ReferenceValueTracker valueTracker;
   private boolean entryChecksEmitted;
   private int currentBytecodeOffset;
@@ -69,6 +70,21 @@ public class EnforcementTransform implements CodeTransform {
               ConstantDescs.CD_String,
               ConstantDescs.CD_String,
               ConstantDescs.CD_MethodType));
+  private static final DirectMethodHandleDesc CHECKED_VIRTUAL_WITH_FALLBACK_RETURN_CHECK_BOOTSTRAP =
+      MethodHandleDesc.ofMethod(
+          DirectMethodHandleDesc.Kind.STATIC,
+          BOUNDARY_BOOTSTRAPS,
+          "checkedVirtualWithFallbackReturnCheck",
+          MethodTypeDesc.of(
+              ConstantDescs.CD_CallSite,
+              ConstantDescs.CD_MethodHandles_Lookup,
+              ConstantDescs.CD_String,
+              ConstantDescs.CD_MethodType,
+              ConstantDescs.CD_Class,
+              ConstantDescs.CD_String,
+              ConstantDescs.CD_String,
+              ConstantDescs.CD_MethodType,
+              ConstantDescs.CD_MethodHandle));
 
   public EnforcementTransform(
       EnforcementPlanner planner,
@@ -109,7 +125,8 @@ public class EnforcementTransform implements CodeTransform {
         policy,
         resolutionEnvironment,
         enableIndyBoundary,
-        true);
+        true,
+        null);
   }
 
   public EnforcementTransform(
@@ -123,6 +140,32 @@ public class EnforcementTransform implements CodeTransform {
       ResolutionEnvironment resolutionEnvironment,
       boolean enableIndyBoundary,
       boolean emitEntryChecks) {
+    this(
+        planner,
+        propertyEmitter,
+        classModel,
+        methodModel,
+        isCheckedScope,
+        loader,
+        policy,
+        resolutionEnvironment,
+        enableIndyBoundary,
+        emitEntryChecks,
+        null);
+  }
+
+  public EnforcementTransform(
+      EnforcementPlanner planner,
+      PropertyEmitter propertyEmitter,
+      ClassModel classModel,
+      MethodModel methodModel,
+      boolean isCheckedScope,
+      ClassLoader loader,
+      RuntimePolicy policy,
+      ResolutionEnvironment resolutionEnvironment,
+      boolean enableIndyBoundary,
+      boolean emitEntryChecks,
+      IndyReturnCheckRegistry returnCheckRegistry) {
     this.planner = planner;
     this.propertyEmitter = propertyEmitter;
     ClassContext classContext =
@@ -136,6 +179,7 @@ public class EnforcementTransform implements CodeTransform {
     this.resolutionEnvironment = resolutionEnvironment;
     this.enableIndyBoundary = enableIndyBoundary;
     this.emitEntryChecks = emitEntryChecks;
+    this.returnCheckRegistry = returnCheckRegistry;
     this.valueTracker = new ReferenceValueTracker(ownerInternalName(), methodModel);
     this.entryChecksEmitted = false;
     this.currentBytecodeOffset = 0;
@@ -252,7 +296,7 @@ public class EnforcementTransform implements CodeTransform {
   }
 
   private void handleInvoke(CodeBuilder b, InvokeInstruction i, BytecodeLocation location) {
-    boolean rewritten = maybeEmitCheckedBoundaryCall(b, i);
+    boolean rewritten = maybeEmitCheckedBoundaryCall(b, i, location);
     if (!rewritten) {
       b.with(i);
     }
@@ -267,7 +311,8 @@ public class EnforcementTransform implements CodeTransform {
     }
   }
 
-  private boolean maybeEmitCheckedBoundaryCall(CodeBuilder builder, InvokeInstruction instruction) {
+  private boolean maybeEmitCheckedBoundaryCall(
+      CodeBuilder builder, InvokeInstruction instruction, BytecodeLocation location) {
     if (!enableIndyBoundary || !isCheckedScope || policy == null) {
       return false;
     }
@@ -315,15 +360,37 @@ public class EnforcementTransform implements CodeTransform {
     }
 
     MethodTypeDesc invocationType = instruction.typeSymbol().insertParameterTypes(0, ownerDesc);
+    MethodPlan fallbackReturnPlan =
+        planner.planUncheckedReceiverFallbackReturn(
+            methodContext,
+            location,
+            new TargetRef.InvokedMethod(ownerInternalName, methodName, instruction.typeSymbol()));
+    if (fallbackReturnPlan.isEmpty() || returnCheckRegistry == null) {
+      builder.invokedynamic(
+          DynamicCallSiteDesc.of(
+              CHECKED_VIRTUAL_BOOTSTRAP,
+              methodName,
+              invocationType,
+              ownerDesc,
+              methodName,
+              EnforcementInstrumenter.safeMethodName(methodName),
+              instruction.typeSymbol()));
+      return true;
+    }
+
+    MethodHandleDesc fallbackReturnFilter =
+        returnCheckRegistry.register(
+            instruction.typeSymbol().returnType(), fallbackReturnPlan, location);
     builder.invokedynamic(
         DynamicCallSiteDesc.of(
-            CHECKED_VIRTUAL_BOOTSTRAP,
+            CHECKED_VIRTUAL_WITH_FALLBACK_RETURN_CHECK_BOOTSTRAP,
             methodName,
             invocationType,
             ownerDesc,
             methodName,
             EnforcementInstrumenter.safeMethodName(methodName),
-            instruction.typeSymbol()));
+            instruction.typeSymbol(),
+            fallbackReturnFilter));
     return true;
   }
 
@@ -462,6 +529,10 @@ public class EnforcementTransform implements CodeTransform {
 
   private String ownerInternalName() {
     return methodContext.classContext().classInfo().internalName();
+  }
+
+  interface IndyReturnCheckRegistry {
+    MethodHandleDesc register(ClassDesc returnType, MethodPlan plan, BytecodeLocation location);
   }
 
   private enum ActionTiming {

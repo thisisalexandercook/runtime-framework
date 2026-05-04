@@ -2,11 +2,13 @@ package io.github.eisop.runtimeframework.instrumentation;
 
 import io.github.eisop.runtimeframework.config.RuntimeOptions;
 import io.github.eisop.runtimeframework.filter.ClassInfo;
+import io.github.eisop.runtimeframework.planning.BytecodeLocation;
 import io.github.eisop.runtimeframework.planning.BridgePlan;
 import io.github.eisop.runtimeframework.planning.ClassContext;
 import io.github.eisop.runtimeframework.planning.EnforcementPlanner;
 import io.github.eisop.runtimeframework.planning.InjectionPoint.Kind;
 import io.github.eisop.runtimeframework.planning.InstrumentationAction;
+import io.github.eisop.runtimeframework.planning.MethodPlan;
 import io.github.eisop.runtimeframework.policy.ClassClassification;
 import io.github.eisop.runtimeframework.policy.RuntimePolicy;
 import io.github.eisop.runtimeframework.resolution.HierarchyResolver;
@@ -26,9 +28,12 @@ import java.lang.classfile.TypeKind;
 import java.lang.classfile.attribute.CodeAttribute;
 import java.lang.constant.ClassDesc;
 import java.lang.constant.ConstantDescs;
+import java.lang.constant.DirectMethodHandleDesc;
+import java.lang.constant.MethodHandleDesc;
 import java.lang.constant.MethodTypeDesc;
 import java.lang.reflect.AccessFlag;
 import java.lang.reflect.Modifier;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
@@ -37,6 +42,7 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
   private static final ClassDesc ASSERTION_ERROR = ClassDesc.of("java.lang.AssertionError");
   private static final MethodTypeDesc ASSERTION_ERROR_STRING_CTOR =
       MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String);
+  private static final String RETURN_FILTER_PREFIX = "$runtimeframework$indyReturnCheck$";
 
   private final EnforcementPlanner planner;
   private final HierarchyResolver hierarchyResolver;
@@ -95,6 +101,15 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
   @Override
   protected CodeTransform createCodeTransform(
       ClassModel classModel, MethodModel methodModel, boolean isCheckedScope, ClassLoader loader) {
+    return createCodeTransform(classModel, methodModel, isCheckedScope, loader, null);
+  }
+
+  private CodeTransform createCodeTransform(
+      ClassModel classModel,
+      MethodModel methodModel,
+      boolean isCheckedScope,
+      ClassLoader loader,
+      EnforcementTransform.IndyReturnCheckRegistry returnCheckRegistry) {
     return new EnforcementTransform(
         planner,
         propertyEmitter,
@@ -104,7 +119,9 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
         loader,
         policy,
         resolutionEnvironment,
-        options.indyBoundaryEnabled());
+        options.indyBoundaryEnabled(),
+        true,
+        returnCheckRegistry);
   }
 
   @Override
@@ -114,8 +131,13 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
       return super.asClassTransform(classModel, loader, isCheckedScope);
     }
 
+    List<GeneratedReturnFilter> returnFilters = new ArrayList<>();
+    EnforcementTransform.IndyReturnCheckRegistry returnCheckRegistry =
+        newReturnFilterRegistry(classModel, returnFilters);
+
     if (isInterface(classModel)) {
-      return asCheckedInterfaceTransform(classModel, loader, isCheckedScope);
+      return asCheckedInterfaceTransform(
+          classModel, loader, isCheckedScope, returnFilters, returnCheckRegistry);
     }
 
     return new ClassTransform() {
@@ -123,19 +145,10 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
       public void accept(ClassBuilder classBuilder, ClassElement classElement) {
         if (classElement instanceof MethodModel methodModel && methodModel.code().isPresent()) {
           if (isSplitCandidate(methodModel) && !hasSafeMethodCollision(classModel, methodModel)) {
-            emitSplitMethod(classBuilder, classModel, methodModel, loader);
+            emitSplitMethod(classBuilder, classModel, methodModel, loader, returnCheckRegistry);
           } else {
-            classBuilder.transformMethod(
-                methodModel,
-                (methodBuilder, methodElement) -> {
-                  if (methodElement instanceof CodeAttribute codeModel) {
-                    methodBuilder.transformCode(
-                        codeModel,
-                        createCodeTransform(classModel, methodModel, isCheckedScope, loader));
-                  } else {
-                    methodBuilder.with(methodElement);
-                  }
-                });
+            transformMethod(
+                classBuilder, classModel, methodModel, loader, isCheckedScope, returnCheckRegistry);
           }
         } else {
           classBuilder.with(classElement);
@@ -144,6 +157,7 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
 
       @Override
       public void atEnd(ClassBuilder builder) {
+        emitReturnFilterMethods(builder, returnFilters);
         emitCheckedClassMarker(builder, classModel);
         generateBridgeMethods(builder, classModel, loader);
       }
@@ -151,7 +165,11 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
   }
 
   private ClassTransform asCheckedInterfaceTransform(
-      ClassModel classModel, ClassLoader loader, boolean isCheckedScope) {
+      ClassModel classModel,
+      ClassLoader loader,
+      boolean isCheckedScope,
+      List<GeneratedReturnFilter> returnFilters,
+      EnforcementTransform.IndyReturnCheckRegistry returnCheckRegistry) {
     return new ClassTransform() {
       @Override
       public void accept(ClassBuilder classBuilder, ClassElement classElement) {
@@ -159,9 +177,15 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
           boolean hasSafeCollision = hasSafeMethodCollision(classModel, methodModel);
           if (methodModel.code().isPresent()) {
             if (isSplitCandidate(methodModel) && !hasSafeCollision) {
-              emitSplitMethod(classBuilder, classModel, methodModel, loader);
+              emitSplitMethod(classBuilder, classModel, methodModel, loader, returnCheckRegistry);
             } else {
-              transformMethod(classBuilder, classModel, methodModel, loader, isCheckedScope);
+              transformMethod(
+                  classBuilder,
+                  classModel,
+                  methodModel,
+                  loader,
+                  isCheckedScope,
+                  returnCheckRegistry);
             }
           } else {
             classBuilder.with(classElement);
@@ -173,6 +197,11 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
           classBuilder.with(classElement);
         }
       }
+
+      @Override
+      public void atEnd(ClassBuilder builder) {
+        emitReturnFilterMethods(builder, returnFilters);
+      }
     };
   }
 
@@ -181,13 +210,16 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
       ClassModel classModel,
       MethodModel methodModel,
       ClassLoader loader,
-      boolean isCheckedScope) {
+      boolean isCheckedScope,
+      EnforcementTransform.IndyReturnCheckRegistry returnCheckRegistry) {
     classBuilder.transformMethod(
         methodModel,
         (methodBuilder, methodElement) -> {
           if (methodElement instanceof CodeAttribute codeModel) {
             methodBuilder.transformCode(
-                codeModel, createCodeTransform(classModel, methodModel, isCheckedScope, loader));
+                codeModel,
+                createCodeTransform(
+                    classModel, methodModel, isCheckedScope, loader, returnCheckRegistry));
           } else {
             methodBuilder.with(methodElement);
           }
@@ -205,7 +237,11 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
   }
 
   private void emitSplitMethod(
-      ClassBuilder builder, ClassModel classModel, MethodModel methodModel, ClassLoader loader) {
+      ClassBuilder builder,
+      ClassModel classModel,
+      MethodModel methodModel,
+      ClassLoader loader,
+      EnforcementTransform.IndyReturnCheckRegistry returnCheckRegistry) {
     String originalName = methodModel.methodName().stringValue();
     MethodTypeDesc desc = methodModel.methodTypeSymbol();
     int originalFlags = methodModel.flags().flagsMask();
@@ -233,7 +269,8 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
                               policy,
                               resolutionEnvironment,
                               options.indyBoundaryEnabled(),
-                              false)));
+                              false,
+                              returnCheckRegistry)));
         });
 
     builder.withMethod(
@@ -319,6 +356,78 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
                         .athrow()));
   }
 
+  private EnforcementTransform.IndyReturnCheckRegistry newReturnFilterRegistry(
+      ClassModel classModel, List<GeneratedReturnFilter> returnFilters) {
+    ClassDesc owner = ClassDesc.ofInternalName(classModel.thisClass().asInternalName());
+    return (returnType, plan, location) -> {
+      MethodTypeDesc descriptor = MethodTypeDesc.of(returnType, returnType);
+      String name = nextReturnFilterName(classModel, returnFilters, descriptor);
+      returnFilters.add(new GeneratedReturnFilter(name, descriptor, plan, location));
+      return MethodHandleDesc.ofMethod(DirectMethodHandleDesc.Kind.STATIC, owner, name, descriptor);
+    };
+  }
+
+  private String nextReturnFilterName(
+      ClassModel classModel, List<GeneratedReturnFilter> returnFilters, MethodTypeDesc descriptor) {
+    int index = returnFilters.size();
+    while (true) {
+      String candidate = RETURN_FILTER_PREFIX + index;
+      boolean existsInClass =
+          classModel.methods().stream()
+              .anyMatch(
+                  method ->
+                      method.methodName().stringValue().equals(candidate)
+                          && method.methodTypeSymbol()
+                              .descriptorString()
+                              .equals(descriptor.descriptorString()));
+      boolean existsInGenerated =
+          returnFilters.stream()
+              .anyMatch(
+                  filter ->
+                      filter.name().equals(candidate)
+                          && filter
+                              .descriptor()
+                              .descriptorString()
+                              .equals(descriptor.descriptorString()));
+      if (!existsInClass && !existsInGenerated) {
+        return candidate;
+      }
+      index++;
+    }
+  }
+
+  private void emitReturnFilterMethods(
+      ClassBuilder builder, List<GeneratedReturnFilter> returnFilters) {
+    for (GeneratedReturnFilter filter : returnFilters) {
+      builder.withMethod(
+          filter.name(),
+          filter.descriptor(),
+          AccessFlag.PRIVATE.mask() | AccessFlag.STATIC.mask() | AccessFlag.SYNTHETIC.mask(),
+          methodBuilder ->
+              methodBuilder.withCode(
+                  codeBuilder -> {
+                    if (filter.location().hasSourceLine()) {
+                      codeBuilder.lineNumber(filter.location().sourceLine());
+                    }
+                    ClassDesc returnType = filter.descriptor().returnType();
+                    loadLocal(codeBuilder, TypeKind.from(returnType), 0);
+                    emitReturnFilterActions(codeBuilder, filter.plan());
+                    returnResult(codeBuilder, returnType);
+                  }));
+    }
+  }
+
+  private void emitReturnFilterActions(CodeBuilder builder, MethodPlan plan) {
+    for (InstrumentationAction action : plan.actions()) {
+      switch (action) {
+        case InstrumentationAction.ValueCheckAction valueCheckAction ->
+            emitValueCheckAction(builder, valueCheckAction);
+        case InstrumentationAction.LifecycleHookAction ignored ->
+            throw new IllegalStateException("LifecycleHookAction emission is not implemented yet");
+      }
+    }
+  }
+
   private void emitCheckedClassMarker(ClassBuilder builder, ClassModel classModel) {
     boolean markerExists =
         classModel.fields().stream()
@@ -376,6 +485,9 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
   private static boolean isInterface(ClassModel classModel) {
     return Modifier.isInterface(classModel.flags().flagsMask());
   }
+
+  private record GeneratedReturnFilter(
+      String name, MethodTypeDesc descriptor, MethodPlan plan, BytecodeLocation location) {}
 
   @Override
   protected void generateBridgeMethods(ClassBuilder builder, ClassModel model, ClassLoader loader) {
