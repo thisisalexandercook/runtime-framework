@@ -267,8 +267,7 @@ public class EnforcementTransform implements CodeTransform {
     }
   }
 
-  private boolean maybeEmitCheckedBoundaryCall(
-      CodeBuilder builder, InvokeInstruction instruction) {
+  private boolean maybeEmitCheckedBoundaryCall(CodeBuilder builder, InvokeInstruction instruction) {
     if (!enableIndyBoundary || !isCheckedScope || policy == null) {
       return false;
     }

@@ -5,8 +5,8 @@ import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.planning.BridgePlan;
 import io.github.eisop.runtimeframework.planning.ClassContext;
 import io.github.eisop.runtimeframework.planning.EnforcementPlanner;
-import io.github.eisop.runtimeframework.planning.InstrumentationAction;
 import io.github.eisop.runtimeframework.planning.InjectionPoint.Kind;
+import io.github.eisop.runtimeframework.planning.InstrumentationAction;
 import io.github.eisop.runtimeframework.policy.ClassClassification;
 import io.github.eisop.runtimeframework.policy.RuntimePolicy;
 import io.github.eisop.runtimeframework.resolution.HierarchyResolver;
@@ -391,10 +391,8 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
 
     private boolean matches(InstrumentationAction action) {
       return switch (this) {
-        case ENTRY ->
-            action.injectionPoint().kind() == Kind.BRIDGE_ENTRY;
-        case EXIT ->
-            action.injectionPoint().kind() == Kind.BRIDGE_EXIT;
+        case ENTRY -> action.injectionPoint().kind() == Kind.BRIDGE_ENTRY;
+        case EXIT -> action.injectionPoint().kind() == Kind.BRIDGE_EXIT;
       };
     }
   }
