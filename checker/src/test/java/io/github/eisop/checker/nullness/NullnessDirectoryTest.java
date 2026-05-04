@@ -22,6 +22,14 @@ public class NullnessDirectoryTest extends RuntimeTestRunner {
   }
 
   @Test
+  public void testInterfaceScenarios() throws Exception {
+    runDirectoryTest(
+        "nullness-interface",
+        "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker",
+        false);
+  }
+
+  @Test
   public void testFieldReadScenarios() throws Exception {
     runDirectoryTest(
         "nullness-field-read",

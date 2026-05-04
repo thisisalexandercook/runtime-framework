@@ -273,7 +273,9 @@ public class EnforcementTransform implements CodeTransform {
     }
 
     Opcode opcode = instruction.opcode();
-    if (opcode != Opcode.INVOKEVIRTUAL && opcode != Opcode.INVOKESTATIC) {
+    if (opcode != Opcode.INVOKEVIRTUAL
+        && opcode != Opcode.INVOKESTATIC
+        && opcode != Opcode.INVOKEINTERFACE) {
       return false;
     }
 
@@ -326,10 +328,15 @@ public class EnforcementTransform implements CodeTransform {
   }
 
   private boolean targetMatchesCallOpcode(MethodModel target, Opcode opcode) {
+    boolean targetIsStatic = Modifier.isStatic(target.flags().flagsMask());
+    if (opcode == Opcode.INVOKEINTERFACE) {
+      return !targetIsStatic
+          && (EnforcementInstrumenter.isSplitCandidate(target)
+              || EnforcementInstrumenter.isInterfaceSafeStubCandidate(target));
+    }
     if (!EnforcementInstrumenter.isSplitCandidate(target)) {
       return false;
     }
-    boolean targetIsStatic = Modifier.isStatic(target.flags().flagsMask());
     return (opcode == Opcode.INVOKESTATIC) == targetIsStatic;
   }
 

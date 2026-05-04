@@ -25,6 +25,7 @@ import java.lang.classfile.MethodModel;
 import java.lang.classfile.TypeKind;
 import java.lang.classfile.attribute.CodeAttribute;
 import java.lang.constant.ClassDesc;
+import java.lang.constant.ConstantDescs;
 import java.lang.constant.MethodTypeDesc;
 import java.lang.reflect.AccessFlag;
 import java.lang.reflect.Modifier;
@@ -32,6 +33,10 @@ import java.util.List;
 import java.util.Objects;
 
 public class EnforcementInstrumenter extends RuntimeInstrumenter {
+
+  private static final ClassDesc ASSERTION_ERROR = ClassDesc.of("java.lang.AssertionError");
+  private static final MethodTypeDesc ASSERTION_ERROR_STRING_CTOR =
+      MethodTypeDesc.of(ConstantDescs.CD_void, ConstantDescs.CD_String);
 
   private final EnforcementPlanner planner;
   private final HierarchyResolver hierarchyResolver;
@@ -109,6 +114,10 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
       return super.asClassTransform(classModel, loader, isCheckedScope);
     }
 
+    if (isInterface(classModel)) {
+      return asCheckedInterfaceTransform(classModel, loader, isCheckedScope);
+    }
+
     return new ClassTransform() {
       @Override
       public void accept(ClassBuilder classBuilder, ClassElement classElement) {
@@ -139,6 +148,50 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
         generateBridgeMethods(builder, classModel, loader);
       }
     };
+  }
+
+  private ClassTransform asCheckedInterfaceTransform(
+      ClassModel classModel, ClassLoader loader, boolean isCheckedScope) {
+    return new ClassTransform() {
+      @Override
+      public void accept(ClassBuilder classBuilder, ClassElement classElement) {
+        if (classElement instanceof MethodModel methodModel) {
+          boolean hasSafeCollision = hasSafeMethodCollision(classModel, methodModel);
+          if (methodModel.code().isPresent()) {
+            if (isSplitCandidate(methodModel) && !hasSafeCollision) {
+              emitSplitMethod(classBuilder, classModel, methodModel, loader);
+            } else {
+              transformMethod(classBuilder, classModel, methodModel, loader, isCheckedScope);
+            }
+          } else {
+            classBuilder.with(classElement);
+            if (isInterfaceSafeStubCandidate(methodModel) && !hasSafeCollision) {
+              emitInterfaceSafeStub(classBuilder, methodModel);
+            }
+          }
+        } else {
+          classBuilder.with(classElement);
+        }
+      }
+    };
+  }
+
+  private void transformMethod(
+      ClassBuilder classBuilder,
+      ClassModel classModel,
+      MethodModel methodModel,
+      ClassLoader loader,
+      boolean isCheckedScope) {
+    classBuilder.transformMethod(
+        methodModel,
+        (methodBuilder, methodElement) -> {
+          if (methodElement instanceof CodeAttribute codeModel) {
+            methodBuilder.transformCode(
+                codeModel, createCodeTransform(classModel, methodModel, isCheckedScope, loader));
+          } else {
+            methodBuilder.with(methodElement);
+          }
+        });
   }
 
   private boolean hasSafeMethodCollision(ClassModel classModel, MethodModel methodModel) {
@@ -233,12 +286,37 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
           safeName,
           methodModel.methodTypeSymbol(),
           Modifier.isInterface(classModel.flags().flagsMask()));
+    } else if (isInterface(classModel)) {
+      builder.invokeinterface(owner, safeName, methodModel.methodTypeSymbol());
     } else {
       builder.invokevirtual(owner, safeName, methodModel.methodTypeSymbol());
     }
     returnResult(
         builder,
         ClassDesc.ofDescriptor(methodModel.methodTypeSymbol().returnType().descriptorString()));
+  }
+
+  private void emitInterfaceSafeStub(ClassBuilder builder, MethodModel methodModel) {
+    String originalName = methodModel.methodName().stringValue();
+    MethodTypeDesc desc = methodModel.methodTypeSymbol();
+    int stubFlags =
+        (methodModel.flags().flagsMask() | AccessFlag.SYNTHETIC.mask())
+            & ~AccessFlag.ABSTRACT.mask();
+
+    builder.withMethod(
+        safeMethodName(originalName),
+        desc,
+        stubFlags,
+        methodBuilder ->
+            methodBuilder.withCode(
+                codeBuilder ->
+                    codeBuilder
+                        .new_(ASSERTION_ERROR)
+                        .dup()
+                        .ldc("Checked interface safe method has no checked implementation")
+                        .invokespecial(
+                            ASSERTION_ERROR, "<init>", ASSERTION_ERROR_STRING_CTOR)
+                        .athrow()));
   }
 
   private void emitCheckedClassMarker(ClassBuilder builder, ClassModel classModel) {
@@ -276,8 +354,27 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
         && (flags & AccessFlag.SYNTHETIC.mask()) == 0;
   }
 
+  static boolean isInterfaceSafeStubCandidate(MethodModel method) {
+    String methodName = method.methodName().stringValue();
+    int flags = method.flags().flagsMask();
+    return method.code().isEmpty()
+        && !methodName.equals("<init>")
+        && !methodName.equals("<clinit>")
+        && !methodName.contains("$runtimeframework$safe")
+        && Modifier.isPublic(flags)
+        && Modifier.isAbstract(flags)
+        && !Modifier.isStatic(flags)
+        && !Modifier.isPrivate(flags)
+        && (flags & AccessFlag.BRIDGE.mask()) == 0
+        && (flags & AccessFlag.SYNTHETIC.mask()) == 0;
+  }
+
   static String safeMethodName(String methodName) {
     return methodName + "$runtimeframework$safe";
+  }
+
+  private static boolean isInterface(ClassModel classModel) {
+    return Modifier.isInterface(classModel.flags().flagsMask());
   }
 
   @Override
