@@ -1,5 +1,6 @@
 package io.github.eisop.testutils;
 
+import io.github.eisop.runtimeframework.config.RuntimeOptions;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -85,9 +86,11 @@ public class RuntimeTestRunner extends AgentTestHarness {
         runAgent(
             mainClass,
             isGlobal,
-            "-Druntime.checker=" + checkerClass,
-            "-Druntime.trustAnnotatedFor=true",
-            "-Druntime.handler=io.github.eisop.testutils.TestViolationHandler");
+            systemProperty(RuntimeOptions.CHECKER_CLASS_PROPERTY, checkerClass),
+            systemProperty(RuntimeOptions.TRUST_ANNOTATED_FOR_PROPERTY, true),
+            systemProperty(
+                RuntimeOptions.HANDLER_CLASS_PROPERTY,
+                "io.github.eisop.testutils.TestViolationHandler"));
 
     verifyErrors(expectedErrors, result.stdout(), filename);
   }

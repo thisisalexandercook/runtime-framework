@@ -1,10 +1,12 @@
 package io.github.eisop.runtimeframework.instrumentation;
 
+import io.github.eisop.runtimeframework.config.RuntimeOptions;
 import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.planning.BridgePlan;
 import io.github.eisop.runtimeframework.planning.ClassContext;
 import io.github.eisop.runtimeframework.planning.EnforcementPlanner;
 import io.github.eisop.runtimeframework.planning.InstrumentationAction;
+import io.github.eisop.runtimeframework.planning.InjectionPoint.Kind;
 import io.github.eisop.runtimeframework.policy.ClassClassification;
 import io.github.eisop.runtimeframework.policy.RuntimePolicy;
 import io.github.eisop.runtimeframework.resolution.HierarchyResolver;
@@ -27,6 +29,7 @@ import java.lang.constant.MethodTypeDesc;
 import java.lang.reflect.AccessFlag;
 import java.lang.reflect.Modifier;
 import java.util.List;
+import java.util.Objects;
 
 public class EnforcementInstrumenter extends RuntimeInstrumenter {
 
@@ -35,7 +38,7 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
   private final PropertyEmitter propertyEmitter;
   private final RuntimePolicy policy;
   private final ResolutionEnvironment resolutionEnvironment;
-  private final boolean enableIndyBoundary;
+  private final RuntimeOptions options;
 
   public EnforcementInstrumenter(EnforcementPlanner planner, HierarchyResolver hierarchyResolver) {
     this(planner, hierarchyResolver, null);
@@ -45,7 +48,13 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
       EnforcementPlanner planner,
       HierarchyResolver hierarchyResolver,
       PropertyEmitter propertyEmitter) {
-    this(planner, hierarchyResolver, propertyEmitter, null, ResolutionEnvironment.system());
+    this(
+        planner,
+        hierarchyResolver,
+        propertyEmitter,
+        null,
+        ResolutionEnvironment.system(),
+        RuntimeOptions.fromSystemProperties());
   }
 
   public EnforcementInstrumenter(
@@ -54,12 +63,28 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
       PropertyEmitter propertyEmitter,
       RuntimePolicy policy,
       ResolutionEnvironment resolutionEnvironment) {
+    this(
+        planner,
+        hierarchyResolver,
+        propertyEmitter,
+        policy,
+        resolutionEnvironment,
+        RuntimeOptions.fromSystemProperties());
+  }
+
+  public EnforcementInstrumenter(
+      EnforcementPlanner planner,
+      HierarchyResolver hierarchyResolver,
+      PropertyEmitter propertyEmitter,
+      RuntimePolicy policy,
+      ResolutionEnvironment resolutionEnvironment,
+      RuntimeOptions options) {
     this.planner = planner;
     this.hierarchyResolver = hierarchyResolver;
     this.propertyEmitter = propertyEmitter;
     this.policy = policy;
     this.resolutionEnvironment = resolutionEnvironment;
-    this.enableIndyBoundary = Boolean.getBoolean("runtime.indy.boundary");
+    this.options = Objects.requireNonNull(options, "options");
   }
 
   @Override
@@ -74,13 +99,13 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
         loader,
         policy,
         resolutionEnvironment,
-        enableIndyBoundary);
+        options.indyBoundaryEnabled());
   }
 
   @Override
   public ClassTransform asClassTransform(
       ClassModel classModel, ClassLoader loader, boolean isCheckedScope) {
-    if (!enableIndyBoundary || !isCheckedScope) {
+    if (!options.indyBoundaryEnabled() || !isCheckedScope) {
       return super.asClassTransform(classModel, loader, isCheckedScope);
     }
 
@@ -154,7 +179,7 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
                               loader,
                               policy,
                               resolutionEnvironment,
-                              enableIndyBoundary,
+                              options.indyBoundaryEnabled(),
                               false)));
         });
 
@@ -184,12 +209,16 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
             loader,
             policy,
             resolutionEnvironment,
-            enableIndyBoundary,
+            options.indyBoundaryEnabled(),
             false)
         .emitParameterChecks(builder);
 
-    builder.aload(0);
-    int slotIndex = 1;
+    boolean isStatic = Modifier.isStatic(methodModel.flags().flagsMask());
+    if (!isStatic) {
+      builder.aload(0);
+    }
+
+    int slotIndex = isStatic ? 0 : 1;
     for (ClassDesc parameterType : methodModel.methodTypeSymbol().parameterList()) {
       TypeKind type = TypeKind.from(parameterType);
       loadLocal(builder, type, slotIndex);
@@ -197,10 +226,16 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
     }
 
     ClassDesc owner = ClassDesc.ofInternalName(classModel.thisClass().asInternalName());
-    builder.invokevirtual(
-        owner,
-        safeMethodName(methodModel.methodName().stringValue()),
-        methodModel.methodTypeSymbol());
+    String safeName = safeMethodName(methodModel.methodName().stringValue());
+    if (isStatic) {
+      builder.invokestatic(
+          owner,
+          safeName,
+          methodModel.methodTypeSymbol(),
+          Modifier.isInterface(classModel.flags().flagsMask()));
+    } else {
+      builder.invokevirtual(owner, safeName, methodModel.methodTypeSymbol());
+    }
     returnResult(
         builder,
         ClassDesc.ofDescriptor(methodModel.methodTypeSymbol().returnType().descriptorString()));
@@ -226,14 +261,14 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
   static boolean isSplitCandidate(MethodModel method) {
     String methodName = method.methodName().stringValue();
     int flags = method.flags().flagsMask();
+    boolean isStatic = Modifier.isStatic(flags);
     return method.code().isPresent()
         && !methodName.equals("<init>")
         && !methodName.equals("<clinit>")
         && !methodName.contains("$runtimeframework$safe")
         && Modifier.isPublic(flags)
-        && !Modifier.isStatic(flags)
         && !Modifier.isPrivate(flags)
-        && !Modifier.isFinal(flags)
+        && (isStatic || !Modifier.isFinal(flags))
         && !Modifier.isSynchronized(flags)
         && !Modifier.isNative(flags)
         && !Modifier.isAbstract(flags)
@@ -357,11 +392,9 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
     private boolean matches(InstrumentationAction action) {
       return switch (this) {
         case ENTRY ->
-            action.injectionPoint().kind()
-                == io.github.eisop.runtimeframework.planning.InjectionPoint.Kind.BRIDGE_ENTRY;
+            action.injectionPoint().kind() == Kind.BRIDGE_ENTRY;
         case EXIT ->
-            action.injectionPoint().kind()
-                == io.github.eisop.runtimeframework.planning.InjectionPoint.Kind.BRIDGE_EXIT;
+            action.injectionPoint().kind() == Kind.BRIDGE_EXIT;
       };
     }
   }

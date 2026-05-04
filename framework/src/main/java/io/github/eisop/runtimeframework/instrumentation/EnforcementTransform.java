@@ -34,6 +34,7 @@ import java.lang.constant.DirectMethodHandleDesc;
 import java.lang.constant.DynamicCallSiteDesc;
 import java.lang.constant.MethodHandleDesc;
 import java.lang.constant.MethodTypeDesc;
+import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -251,7 +252,7 @@ public class EnforcementTransform implements CodeTransform {
   }
 
   private void handleInvoke(CodeBuilder b, InvokeInstruction i, BytecodeLocation location) {
-    boolean rewritten = maybeEmitIndyBoundaryCall(b, i);
+    boolean rewritten = maybeEmitCheckedBoundaryCall(b, i);
     if (!rewritten) {
       b.with(i);
     }
@@ -266,11 +267,14 @@ public class EnforcementTransform implements CodeTransform {
     }
   }
 
-  private boolean maybeEmitIndyBoundaryCall(CodeBuilder builder, InvokeInstruction instruction) {
-    if (!enableIndyBoundary
-        || !isCheckedScope
-        || policy == null
-        || instruction.opcode() != Opcode.INVOKEVIRTUAL) {
+  private boolean maybeEmitCheckedBoundaryCall(
+      CodeBuilder builder, InvokeInstruction instruction) {
+    if (!enableIndyBoundary || !isCheckedScope || policy == null) {
+      return false;
+    }
+
+    Opcode opcode = instruction.opcode();
+    if (opcode != Opcode.INVOKEVIRTUAL && opcode != Opcode.INVOKESTATIC) {
       return false;
     }
 
@@ -293,13 +297,22 @@ public class EnforcementTransform implements CodeTransform {
                 methodName,
                 instruction.typeSymbol().descriptorString(),
                 methodContext.classContext().classInfo().loader())
-            .filter(EnforcementInstrumenter::isSplitCandidate)
+            .filter(method -> targetMatchesCallOpcode(method, opcode))
             .isPresent();
     if (!targetHasSafeBody) {
       return false;
     }
 
     ClassDesc ownerDesc = ClassDesc.ofInternalName(ownerInternalName);
+    if (opcode == Opcode.INVOKESTATIC) {
+      builder.invokestatic(
+          ownerDesc,
+          EnforcementInstrumenter.safeMethodName(methodName),
+          instruction.typeSymbol(),
+          instruction.isInterface());
+      return true;
+    }
+
     MethodTypeDesc invocationType = instruction.typeSymbol().insertParameterTypes(0, ownerDesc);
     builder.invokedynamic(
         DynamicCallSiteDesc.of(
@@ -311,6 +324,14 @@ public class EnforcementTransform implements CodeTransform {
             EnforcementInstrumenter.safeMethodName(methodName),
             instruction.typeSymbol()));
     return true;
+  }
+
+  private boolean targetMatchesCallOpcode(MethodModel target, Opcode opcode) {
+    if (!EnforcementInstrumenter.isSplitCandidate(target)) {
+      return false;
+    }
+    boolean targetIsStatic = Modifier.isStatic(target.flags().flagsMask());
+    return (opcode == Opcode.INVOKESTATIC) == targetIsStatic;
   }
 
   private void handleArrayStore(CodeBuilder b, ArrayStoreInstruction a, BytecodeLocation location) {

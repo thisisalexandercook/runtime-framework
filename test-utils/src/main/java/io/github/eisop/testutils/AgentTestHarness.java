@@ -1,5 +1,6 @@
 package io.github.eisop.testutils;
 
+import io.github.eisop.runtimeframework.config.RuntimeOptions;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -138,7 +139,7 @@ public abstract class AgentTestHarness {
     cmd.add("-javaagent:" + frameworkJar.toAbsolutePath());
 
     if (isGlobal) {
-      cmd.add("-Druntime.global=true");
+      cmd.add(systemProperty(RuntimeOptions.GLOBAL_MODE_PROPERTY, true));
     }
 
     cmd.addAll(List.of(agentArgs));
@@ -187,6 +188,14 @@ public abstract class AgentTestHarness {
     }
 
     return new TestResult(p.exitValue(), stdout, stderr);
+  }
+
+  protected static String systemProperty(String name, boolean value) {
+    return systemProperty(name, Boolean.toString(value));
+  }
+
+  protected static String systemProperty(String name, String value) {
+    return "-D" + name + "=" + value;
   }
 
   protected record TestResult(int exitCode, String stdout, String stderr) {}

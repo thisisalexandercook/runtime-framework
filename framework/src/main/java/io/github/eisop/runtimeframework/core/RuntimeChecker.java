@@ -1,5 +1,6 @@
 package io.github.eisop.runtimeframework.core;
 
+import io.github.eisop.runtimeframework.config.RuntimeOptions;
 import io.github.eisop.runtimeframework.instrumentation.EnforcementInstrumenter;
 import io.github.eisop.runtimeframework.instrumentation.RuntimeInstrumenter;
 import io.github.eisop.runtimeframework.planning.ContractEnforcementPlanner;
@@ -22,11 +23,21 @@ public abstract class RuntimeChecker {
   public abstract CheckerSemantics getSemantics();
 
   public final RuntimeInstrumenter createInstrumenter(RuntimePolicy policy) {
-    return createInstrumenter(policy, ResolutionEnvironment.system());
+    return createInstrumenter(policy, RuntimeOptions.fromSystemProperties());
+  }
+
+  public final RuntimeInstrumenter createInstrumenter(
+      RuntimePolicy policy, RuntimeOptions options) {
+    return createInstrumenter(policy, ResolutionEnvironment.system(), options);
   }
 
   public RuntimeInstrumenter createInstrumenter(
       RuntimePolicy policy, ResolutionEnvironment resolutionEnvironment) {
+    return createInstrumenter(policy, resolutionEnvironment, RuntimeOptions.fromSystemProperties());
+  }
+
+  public RuntimeInstrumenter createInstrumenter(
+      RuntimePolicy policy, ResolutionEnvironment resolutionEnvironment, RuntimeOptions options) {
     CheckerSemantics semantics = getSemantics();
     HierarchyResolver resolver =
         new BytecodeHierarchyResolver(info -> policy.isChecked(info), resolutionEnvironment);
@@ -35,7 +46,8 @@ public abstract class RuntimeChecker {
         resolver,
         semantics.emitter(),
         policy,
-        resolutionEnvironment);
+        resolutionEnvironment,
+        options);
   }
 
   /**
