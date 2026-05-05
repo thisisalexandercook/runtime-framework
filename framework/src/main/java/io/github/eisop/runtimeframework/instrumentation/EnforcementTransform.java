@@ -37,6 +37,7 @@ import java.lang.constant.MethodTypeDesc;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /** A CodeTransform that injects runtime checks based on an {@link EnforcementPlanner}. */
 public class EnforcementTransform implements CodeTransform {
@@ -336,42 +337,38 @@ public class EnforcementTransform implements CodeTransform {
       return false;
     }
 
-    boolean targetHasSafeBody =
-        resolutionEnvironment
-            .findDeclaredMethod(
-                ownerInternalName,
-                methodName,
-                instruction.typeSymbol().descriptorString(),
-                methodContext.classContext().classInfo().loader())
-            .filter(method -> targetMatchesCallOpcode(method, opcode))
-            .isPresent();
-    if (!targetHasSafeBody) {
+    Optional<ResolutionEnvironment.ResolvedMethod> resolvedTarget =
+        resolveBoundaryTarget(ownerInternalName, methodName, instruction.typeSymbol(), opcode);
+    if (resolvedTarget.isEmpty()) {
       return false;
     }
 
-    ClassDesc ownerDesc = ClassDesc.ofInternalName(ownerInternalName);
+    ClassDesc invocationOwnerDesc = ClassDesc.ofInternalName(ownerInternalName);
+    ClassDesc targetOwnerDesc = ClassDesc.ofInternalName(resolvedTarget.get().ownerInternalName());
     if (opcode == Opcode.INVOKESTATIC) {
       builder.invokestatic(
-          ownerDesc,
+          targetOwnerDesc,
           EnforcementInstrumenter.safeMethodName(methodName),
           instruction.typeSymbol(),
           instruction.isInterface());
       return true;
     }
 
-    MethodTypeDesc invocationType = instruction.typeSymbol().insertParameterTypes(0, ownerDesc);
+    MethodTypeDesc invocationType =
+        instruction.typeSymbol().insertParameterTypes(0, invocationOwnerDesc);
     MethodPlan fallbackReturnPlan =
         planner.planUncheckedReceiverFallbackReturn(
             methodContext,
             location,
-            new TargetRef.InvokedMethod(ownerInternalName, methodName, instruction.typeSymbol()));
+            new TargetRef.InvokedMethod(
+                resolvedTarget.get().ownerInternalName(), methodName, instruction.typeSymbol()));
     if (fallbackReturnPlan.isEmpty() || returnCheckRegistry == null) {
       builder.invokedynamic(
           DynamicCallSiteDesc.of(
               CHECKED_VIRTUAL_BOOTSTRAP,
               methodName,
               invocationType,
-              ownerDesc,
+              targetOwnerDesc,
               methodName,
               EnforcementInstrumenter.safeMethodName(methodName),
               instruction.typeSymbol()));
@@ -386,12 +383,49 @@ public class EnforcementTransform implements CodeTransform {
             CHECKED_VIRTUAL_WITH_FALLBACK_RETURN_CHECK_BOOTSTRAP,
             methodName,
             invocationType,
-            ownerDesc,
+            targetOwnerDesc,
             methodName,
             EnforcementInstrumenter.safeMethodName(methodName),
             instruction.typeSymbol(),
             fallbackReturnFilter));
     return true;
+  }
+
+  private Optional<ResolutionEnvironment.ResolvedMethod> resolveBoundaryTarget(
+      String ownerInternalName, String methodName, MethodTypeDesc descriptor, Opcode opcode) {
+    ClassLoader loader = methodContext.classContext().classInfo().loader();
+    Optional<ResolutionEnvironment.ResolvedMethod> resolved =
+        switch (opcode) {
+          case INVOKEVIRTUAL ->
+              resolutionEnvironment.findResolvedVirtualMethod(
+                  ownerInternalName, methodName, descriptor.descriptorString(), loader);
+          case INVOKEINTERFACE ->
+              resolutionEnvironment.findResolvedInterfaceMethod(
+                  ownerInternalName, methodName, descriptor.descriptorString(), loader);
+          case INVOKESTATIC ->
+              resolutionEnvironment
+                  .loadClass(ownerInternalName, loader)
+                  .flatMap(
+                      model ->
+                          resolutionEnvironment
+                              .findDeclaredMethod(
+                                  ownerInternalName,
+                                  methodName,
+                                  descriptor.descriptorString(),
+                                  loader)
+                              .map(
+                                  method ->
+                                      new ResolutionEnvironment.ResolvedMethod(
+                                          ownerInternalName, model, method)));
+          default -> Optional.empty();
+        };
+
+    return resolved
+        .filter(
+            method ->
+                policy.isChecked(
+                    new ClassInfo(method.ownerInternalName(), loader, null), method.ownerModel()))
+        .filter(method -> targetMatchesCallOpcode(method.method(), opcode));
   }
 
   private boolean targetMatchesCallOpcode(MethodModel target, Opcode opcode) {

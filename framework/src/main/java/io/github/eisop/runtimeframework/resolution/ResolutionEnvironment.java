@@ -5,8 +5,10 @@ import java.lang.classfile.FieldModel;
 import java.lang.classfile.Label;
 import java.lang.classfile.MethodModel;
 import java.lang.classfile.TypeAnnotation;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Shared environment for bytecode metadata lookup.
@@ -49,6 +51,68 @@ public interface ResolutionEnvironment {
                     .filter(
                         method -> method.methodTypeSymbol().descriptorString().equals(descriptor))
                     .findFirst());
+  }
+
+  default Optional<ResolvedMethod> findResolvedVirtualMethod(
+      String ownerInternalName, String methodName, String descriptor, ClassLoader loader) {
+    Optional<ClassModel> current = loadClass(ownerInternalName, loader);
+    while (current.isPresent()) {
+      ClassModel model = current.get();
+      Optional<MethodModel> method = findMethod(model, methodName, descriptor);
+      if (method.isPresent()) {
+        return Optional.of(
+            new ResolvedMethod(model.thisClass().asInternalName(), model, method.get()));
+      }
+      current = loadSuperclass(model, loader);
+    }
+    return Optional.empty();
+  }
+
+  default Optional<ResolvedMethod> findResolvedInterfaceMethod(
+      String ownerInternalName, String methodName, String descriptor, ClassLoader loader) {
+    return loadClass(ownerInternalName, loader)
+        .flatMap(
+            model ->
+                findResolvedInterfaceMethod(
+                    model, methodName, descriptor, loader, new HashSet<>()));
+  }
+
+  private Optional<ResolvedMethod> findResolvedInterfaceMethod(
+      ClassModel model,
+      String methodName,
+      String descriptor,
+      ClassLoader loader,
+      Set<String> visited) {
+    String internalName = model.thisClass().asInternalName();
+    if (!visited.add(internalName)) {
+      return Optional.empty();
+    }
+
+    Optional<MethodModel> method = findMethod(model, methodName, descriptor);
+    if (method.isPresent()) {
+      return Optional.of(new ResolvedMethod(internalName, model, method.get()));
+    }
+
+    for (var parent : model.interfaces()) {
+      Optional<ResolvedMethod> resolved =
+          loadClass(parent.asInternalName(), loader)
+              .flatMap(
+                  parentModel ->
+                      findResolvedInterfaceMethod(
+                          parentModel, methodName, descriptor, loader, visited));
+      if (resolved.isPresent()) {
+        return resolved;
+      }
+    }
+    return Optional.empty();
+  }
+
+  private Optional<MethodModel> findMethod(
+      ClassModel model, String methodName, String descriptor) {
+    return model.methods().stream()
+        .filter(method -> method.methodName().stringValue().equals(methodName))
+        .filter(method -> method.methodTypeSymbol().descriptorString().equals(descriptor))
+        .findFirst();
   }
 
   /**
@@ -98,6 +162,8 @@ public interface ResolutionEnvironment {
           .orElse(false);
     }
   }
+
+  record ResolvedMethod(String ownerInternalName, ClassModel ownerModel, MethodModel method) {}
 
   final class Holder {
     private static final ResolutionEnvironment INSTANCE = new CachingResolutionEnvironment();
