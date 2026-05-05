@@ -21,11 +21,14 @@ import java.lang.classfile.ClassElement;
 import java.lang.classfile.ClassModel;
 import java.lang.classfile.ClassTransform;
 import java.lang.classfile.CodeBuilder;
+import java.lang.classfile.CodeElement;
 import java.lang.classfile.CodeTransform;
 import java.lang.classfile.MethodElement;
 import java.lang.classfile.MethodModel;
+import java.lang.classfile.Opcode;
 import java.lang.classfile.TypeKind;
 import java.lang.classfile.attribute.CodeAttribute;
+import java.lang.classfile.instruction.InvokeInstruction;
 import java.lang.constant.ClassDesc;
 import java.lang.constant.ConstantDescs;
 import java.lang.constant.DirectMethodHandleDesc;
@@ -145,7 +148,8 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
       public void accept(ClassBuilder classBuilder, ClassElement classElement) {
         if (classElement instanceof MethodModel methodModel && methodModel.code().isPresent()) {
           if (isSplitCandidate(methodModel) && !hasSafeMethodCollision(classModel, methodModel)) {
-            emitSplitMethod(classBuilder, classModel, methodModel, loader, returnCheckRegistry);
+            emitSplitMethodByKind(
+                classBuilder, classModel, methodModel, loader, returnCheckRegistry);
           } else {
             transformMethod(
                 classBuilder, classModel, methodModel, loader, isCheckedScope, returnCheckRegistry);
@@ -177,7 +181,8 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
           boolean hasSafeCollision = hasSafeMethodCollision(classModel, methodModel);
           if (methodModel.code().isPresent()) {
             if (isSplitCandidate(methodModel) && !hasSafeCollision) {
-              emitSplitMethod(classBuilder, classModel, methodModel, loader, returnCheckRegistry);
+              emitSplitMethodByKind(
+                  classBuilder, classModel, methodModel, loader, returnCheckRegistry);
             } else {
               transformMethod(
                   classBuilder,
@@ -226,6 +231,19 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
         });
   }
 
+  private void emitSplitMethodByKind(
+      ClassBuilder builder,
+      ClassModel classModel,
+      MethodModel methodModel,
+      ClassLoader loader,
+      EnforcementTransform.IndyReturnCheckRegistry returnCheckRegistry) {
+    if (isBridgeSplitCandidate(methodModel)) {
+      emitSplitBridgeMethod(builder, classModel, methodModel, loader);
+    } else {
+      emitSplitMethod(builder, classModel, methodModel, loader, returnCheckRegistry);
+    }
+  }
+
   private boolean hasSafeMethodCollision(ClassModel classModel, MethodModel methodModel) {
     String safeName = safeMethodName(methodModel.methodName().stringValue());
     String descriptor = methodModel.methodType().stringValue();
@@ -271,6 +289,43 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
                               options.indyBoundaryEnabled(),
                               false,
                               returnCheckRegistry)));
+        });
+
+    builder.withMethod(
+        originalName,
+        desc,
+        originalFlags,
+        wrapperBuilder -> {
+          for (MethodElement element : methodModel) {
+            if (!(element instanceof CodeAttribute)) {
+              wrapperBuilder.with(element);
+            }
+          }
+          wrapperBuilder.withCode(
+              codeBuilder -> emitWrapperBody(codeBuilder, classModel, methodModel, loader));
+        });
+  }
+
+  private void emitSplitBridgeMethod(
+      ClassBuilder builder, ClassModel classModel, MethodModel methodModel, ClassLoader loader) {
+    String originalName = methodModel.methodName().stringValue();
+    MethodTypeDesc desc = methodModel.methodTypeSymbol();
+    int originalFlags = methodModel.flags().flagsMask();
+    int safeFlags = originalFlags | AccessFlag.SYNTHETIC.mask();
+    String safeName = safeMethodName(originalName);
+
+    builder.withMethod(
+        safeName,
+        desc,
+        safeFlags,
+        safeBuilder -> {
+          methodModel
+              .code()
+              .ifPresent(
+                  codeModel ->
+                      safeBuilder.transformCode(
+                          codeModel,
+                          new BridgeSafeTransform(methodModel, loader)));
         });
 
     builder.withMethod(
@@ -446,6 +501,10 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
   }
 
   static boolean isSplitCandidate(MethodModel method) {
+    return isRegularSplitCandidate(method) || isBridgeSplitCandidate(method);
+  }
+
+  private static boolean isRegularSplitCandidate(MethodModel method) {
     String methodName = method.methodName().stringValue();
     int flags = method.flags().flagsMask();
     return method.code().isPresent()
@@ -458,6 +517,22 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
         && !Modifier.isAbstract(flags)
         && (flags & AccessFlag.BRIDGE.mask()) == 0
         && (flags & AccessFlag.SYNTHETIC.mask()) == 0;
+  }
+
+  private static boolean isBridgeSplitCandidate(MethodModel method) {
+    String methodName = method.methodName().stringValue();
+    int flags = method.flags().flagsMask();
+    return method.code().isPresent()
+        && !methodName.equals("<init>")
+        && !methodName.equals("<clinit>")
+        && !methodName.contains("$runtimeframework$safe")
+        && Modifier.isPublic(flags)
+        && !Modifier.isPrivate(flags)
+        && !Modifier.isStatic(flags)
+        && !Modifier.isNative(flags)
+        && !Modifier.isAbstract(flags)
+        && (flags & AccessFlag.BRIDGE.mask()) != 0
+        && (flags & AccessFlag.SYNTHETIC.mask()) != 0;
   }
 
   static boolean isInterfaceSafeStubCandidate(MethodModel method) {
@@ -485,6 +560,76 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
 
   private record GeneratedReturnFilter(
       String name, MethodTypeDesc descriptor, MethodPlan plan, BytecodeLocation location) {}
+
+  private final class BridgeSafeTransform implements CodeTransform {
+    private final MethodModel bridgeMethod;
+    private final ClassLoader loader;
+
+    BridgeSafeTransform(MethodModel bridgeMethod, ClassLoader loader) {
+      this.bridgeMethod = bridgeMethod;
+      this.loader = loader;
+    }
+
+    @Override
+    public void accept(CodeBuilder builder, CodeElement element) {
+      if (element instanceof InvokeInstruction invoke && maybeEmitSafeForward(builder, invoke)) {
+        return;
+      }
+      builder.with(element);
+    }
+
+    private boolean maybeEmitSafeForward(CodeBuilder builder, InvokeInstruction invoke) {
+      Opcode opcode = invoke.opcode();
+      if (opcode != Opcode.INVOKEVIRTUAL
+          && opcode != Opcode.INVOKEINTERFACE
+          && opcode != Opcode.INVOKESTATIC) {
+        return false;
+      }
+
+      String methodName = invoke.name().stringValue();
+      if (!methodName.equals(bridgeMethod.methodName().stringValue())
+          || methodName.contains("$runtimeframework$safe")
+          || invoke
+              .typeSymbol()
+              .descriptorString()
+              .equals(bridgeMethod.methodTypeSymbol().descriptorString())) {
+        return false;
+      }
+
+      String ownerInternalName = invoke.owner().asInternalName();
+      if (policy == null
+          || !policy.isChecked(new ClassInfo(ownerInternalName, loader, null))
+          || !hasSafeForwardTarget(ownerInternalName, methodName, invoke.typeSymbol(), opcode)) {
+        return false;
+      }
+
+      ClassDesc owner = ClassDesc.ofInternalName(ownerInternalName);
+      String safeName = safeMethodName(methodName);
+      if (opcode == Opcode.INVOKESTATIC) {
+        builder.invokestatic(owner, safeName, invoke.typeSymbol(), invoke.isInterface());
+      } else if (opcode == Opcode.INVOKEINTERFACE) {
+        builder.invokeinterface(owner, safeName, invoke.typeSymbol());
+      } else {
+        builder.invokevirtual(owner, safeName, invoke.typeSymbol());
+      }
+      return true;
+    }
+
+    private boolean hasSafeForwardTarget(
+        String ownerInternalName, String methodName, MethodTypeDesc descriptor, Opcode opcode) {
+      return resolutionEnvironment
+          .findDeclaredMethod(
+              ownerInternalName, methodName, descriptor.descriptorString(), loader)
+          .filter(EnforcementInstrumenter::isSplitCandidate)
+          .filter(method -> methodMatchesOpcode(method, opcode))
+          .isPresent();
+    }
+
+    private boolean methodMatchesOpcode(MethodModel method, Opcode opcode) {
+      boolean methodIsStatic = Modifier.isStatic(method.flags().flagsMask());
+      return (opcode == Opcode.INVOKESTATIC) == methodIsStatic;
+    }
+  }
 
   @Override
   protected void generateBridgeMethods(ClassBuilder builder, ClassModel model, ClassLoader loader) {
