@@ -11,6 +11,7 @@ import io.github.eisop.runtimeframework.planning.MethodPlan;
 import io.github.eisop.runtimeframework.planning.TargetRef;
 import io.github.eisop.runtimeframework.policy.ClassClassification;
 import io.github.eisop.runtimeframework.policy.RuntimePolicy;
+import io.github.eisop.runtimeframework.resolution.ParentMethod;
 import io.github.eisop.runtimeframework.resolution.ResolutionEnvironment;
 import io.github.eisop.runtimeframework.runtime.BoundaryBootstraps;
 import io.github.eisop.runtimeframework.semantics.PropertyEmitter;
@@ -34,6 +35,7 @@ import java.lang.constant.DirectMethodHandleDesc;
 import java.lang.constant.DynamicCallSiteDesc;
 import java.lang.constant.MethodHandleDesc;
 import java.lang.constant.MethodTypeDesc;
+import java.lang.reflect.AccessFlag;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.List;
@@ -304,10 +306,7 @@ public class EnforcementTransform implements CodeTransform {
     if (isCheckedScope) {
       FlowEvent.BoundaryCallReturn event =
           new FlowEvent.BoundaryCallReturn(
-              methodContext,
-              location,
-              new TargetRef.InvokedMethod(
-                  i.owner().asInternalName(), i.name().stringValue(), i.typeSymbol()));
+              methodContext, location, returnBoundaryTarget(i));
       emitPlannedActions(b, event, ActionTiming.AFTER_INSTRUCTION);
     }
   }
@@ -394,38 +393,88 @@ public class EnforcementTransform implements CodeTransform {
   private Optional<ResolutionEnvironment.ResolvedMethod> resolveBoundaryTarget(
       String ownerInternalName, String methodName, MethodTypeDesc descriptor, Opcode opcode) {
     ClassLoader loader = methodContext.classContext().classInfo().loader();
-    Optional<ResolutionEnvironment.ResolvedMethod> resolved =
-        switch (opcode) {
-          case INVOKEVIRTUAL ->
-              resolutionEnvironment.findResolvedVirtualMethod(
-                  ownerInternalName, methodName, descriptor.descriptorString(), loader);
-          case INVOKEINTERFACE ->
-              resolutionEnvironment.findResolvedInterfaceMethod(
-                  ownerInternalName, methodName, descriptor.descriptorString(), loader);
-          case INVOKESTATIC ->
-              resolutionEnvironment
-                  .loadClass(ownerInternalName, loader)
-                  .flatMap(
-                      model ->
-                          resolutionEnvironment
-                              .findDeclaredMethod(
-                                  ownerInternalName,
-                                  methodName,
-                                  descriptor.descriptorString(),
-                                  loader)
-                              .map(
-                                  method ->
-                                      new ResolutionEnvironment.ResolvedMethod(
-                                          ownerInternalName, model, method)));
-          default -> Optional.empty();
-        };
-
-    return resolved
+    return resolveInvokeTarget(ownerInternalName, methodName, descriptor, opcode)
         .filter(
             method ->
                 policy.isChecked(
                     new ClassInfo(method.ownerInternalName(), loader, null), method.ownerModel()))
         .filter(method -> targetMatchesCallOpcode(method.method(), opcode));
+  }
+
+  private TargetRef.InvokedMethod returnBoundaryTarget(InvokeInstruction instruction) {
+    String ownerInternalName = instruction.owner().asInternalName();
+    String methodName = instruction.name().stringValue();
+    MethodTypeDesc descriptor = instruction.typeSymbol();
+    String resolvedOwner =
+        resolveInvokeTarget(ownerInternalName, methodName, descriptor, instruction.opcode())
+            .filter(resolved -> !generatedBridgeWillHandle(ownerInternalName, resolved))
+            .map(ResolutionEnvironment.ResolvedMethod::ownerInternalName)
+            .orElse(ownerInternalName);
+    return new TargetRef.InvokedMethod(resolvedOwner, methodName, descriptor);
+  }
+
+  private boolean generatedBridgeWillHandle(
+      String ownerInternalName, ResolutionEnvironment.ResolvedMethod resolved) {
+    if (ownerInternalName.equals(resolved.ownerInternalName())) {
+      return false;
+    }
+
+    ClassLoader loader = methodContext.classContext().classInfo().loader();
+    if (policy == null
+        || policy.isChecked(
+            new ClassInfo(resolved.ownerInternalName(), loader, null), resolved.ownerModel())
+        || !isGeneratedBridgeCandidate(resolved.method())) {
+      return false;
+    }
+
+    return resolutionEnvironment
+        .loadClass(ownerInternalName, loader)
+        .filter(model -> policy.isChecked(new ClassInfo(ownerInternalName, loader, null), model))
+        .filter(model -> !Modifier.isInterface(model.flags().flagsMask()))
+        .map(
+            model ->
+                planner.shouldGenerateBridge(
+                    new ClassContext(
+                        new ClassInfo(ownerInternalName, loader, null),
+                        model,
+                        ClassClassification.CHECKED),
+                    new ParentMethod(resolved.ownerModel(), resolved.method())))
+        .orElse(false);
+  }
+
+  private boolean isGeneratedBridgeCandidate(MethodModel method) {
+    int flags = method.flags().flagsMask();
+    return !Modifier.isPrivate(flags)
+        && !Modifier.isStatic(flags)
+        && !Modifier.isFinal(flags)
+        && (flags & AccessFlag.SYNTHETIC.mask()) == 0
+        && (flags & AccessFlag.BRIDGE.mask()) == 0;
+  }
+
+  private Optional<ResolutionEnvironment.ResolvedMethod> resolveInvokeTarget(
+      String ownerInternalName, String methodName, MethodTypeDesc descriptor, Opcode opcode) {
+    ClassLoader loader = methodContext.classContext().classInfo().loader();
+    return switch (opcode) {
+      case INVOKEVIRTUAL ->
+          resolutionEnvironment.findResolvedVirtualMethod(
+              ownerInternalName, methodName, descriptor.descriptorString(), loader);
+      case INVOKEINTERFACE ->
+          resolutionEnvironment.findResolvedInterfaceMethod(
+              ownerInternalName, methodName, descriptor.descriptorString(), loader);
+      case INVOKESTATIC, INVOKESPECIAL ->
+          resolutionEnvironment
+              .loadClass(ownerInternalName, loader)
+              .flatMap(
+                  model ->
+                      resolutionEnvironment
+                          .findDeclaredMethod(
+                              ownerInternalName, methodName, descriptor.descriptorString(), loader)
+                          .map(
+                              method ->
+                                  new ResolutionEnvironment.ResolvedMethod(
+                                      ownerInternalName, model, method)));
+      default -> Optional.empty();
+    };
   }
 
   private boolean targetMatchesCallOpcode(MethodModel target, Opcode opcode) {
