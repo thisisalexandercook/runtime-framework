@@ -454,7 +454,6 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
         && !methodName.contains("$runtimeframework$safe")
         && Modifier.isPublic(flags)
         && !Modifier.isPrivate(flags)
-        && !Modifier.isSynchronized(flags)
         && !Modifier.isNative(flags)
         && !Modifier.isAbstract(flags)
         && (flags & AccessFlag.BRIDGE.mask()) == 0
