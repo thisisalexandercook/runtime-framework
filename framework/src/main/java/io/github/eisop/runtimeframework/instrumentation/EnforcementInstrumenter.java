@@ -39,6 +39,7 @@ import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 public class EnforcementInstrumenter extends RuntimeInstrumenter {
 
@@ -582,6 +583,7 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
       Opcode opcode = invoke.opcode();
       if (opcode != Opcode.INVOKEVIRTUAL
           && opcode != Opcode.INVOKEINTERFACE
+          && opcode != Opcode.INVOKESPECIAL
           && opcode != Opcode.INVOKESTATIC) {
         return false;
       }
@@ -609,6 +611,8 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
         builder.invokestatic(owner, safeName, invoke.typeSymbol(), invoke.isInterface());
       } else if (opcode == Opcode.INVOKEINTERFACE) {
         builder.invokeinterface(owner, safeName, invoke.typeSymbol());
+      } else if (opcode == Opcode.INVOKESPECIAL) {
+        builder.invokespecial(owner, safeName, invoke.typeSymbol());
       } else {
         builder.invokevirtual(owner, safeName, invoke.typeSymbol());
       }
@@ -617,12 +621,43 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
 
     private boolean hasSafeForwardTarget(
         String ownerInternalName, String methodName, MethodTypeDesc descriptor, Opcode opcode) {
-      return resolutionEnvironment
-          .findDeclaredMethod(
-              ownerInternalName, methodName, descriptor.descriptorString(), loader)
-          .filter(EnforcementInstrumenter::isSplitCandidate)
-          .filter(method -> methodMatchesOpcode(method, opcode))
+      return resolveSafeForwardTarget(ownerInternalName, methodName, descriptor, opcode)
+          .filter(
+              method ->
+                  policy.isChecked(
+                      new ClassInfo(method.ownerInternalName(), loader, null),
+                      method.ownerModel()))
+          .filter(method -> EnforcementInstrumenter.isSplitCandidate(method.method()))
+          .filter(method -> methodMatchesOpcode(method.method(), opcode))
           .isPresent();
+    }
+
+    private Optional<ResolutionEnvironment.ResolvedMethod> resolveSafeForwardTarget(
+        String ownerInternalName, String methodName, MethodTypeDesc descriptor, Opcode opcode) {
+      return switch (opcode) {
+        case INVOKEVIRTUAL ->
+            resolutionEnvironment.findResolvedVirtualMethod(
+                ownerInternalName, methodName, descriptor.descriptorString(), loader);
+        case INVOKEINTERFACE ->
+            resolutionEnvironment.findResolvedInterfaceMethod(
+                ownerInternalName, methodName, descriptor.descriptorString(), loader);
+        case INVOKESTATIC, INVOKESPECIAL ->
+            resolutionEnvironment
+                .loadClass(ownerInternalName, loader)
+                .flatMap(
+                    model ->
+                        resolutionEnvironment
+                            .findDeclaredMethod(
+                                ownerInternalName,
+                                methodName,
+                                descriptor.descriptorString(),
+                                loader)
+                            .map(
+                                method ->
+                                    new ResolutionEnvironment.ResolvedMethod(
+                                        ownerInternalName, model, method)));
+        default -> Optional.empty();
+      };
     }
 
     private boolean methodMatchesOpcode(MethodModel method, Opcode opcode) {
