@@ -423,6 +423,7 @@ public class EnforcementTransform implements CodeTransform {
     if (policy == null
         || policy.isChecked(
             new ClassInfo(resolved.ownerInternalName(), loader, null), resolved.ownerModel())
+        || Modifier.isInterface(resolved.ownerModel().flags().flagsMask())
         || !isGeneratedBridgeCandidate(resolved.method())) {
       return false;
     }
