@@ -1,0 +1,302 @@
+# TITLE: Runtime initialization Examples 
+
+The following examples illustrate situations where unchecked code can expose
+objects whose invariants have not yet been established. These scenarios motivate
+runtime initialization checks in a gradual type system that combines checked
+and unchecked code.
+
+Two (maybe 3?)  distinct kinds of initialization guarantees are relevant:
+
+**Shallow initialization**
+
+Shallow initialization concerns the *receiver object itself*.  
+A shallow initialization violation occurs when a reference to an object is used
+before the object's own invariants have been established.
+
+In these cases, the object itself is still under construction and its fields may
+not yet satisfy their declared invariants.
+
+**Deep initialization**
+
+Deep initialization extends the guarantee transitively to objects reachable
+through fields. If an object is considered initialized, then any references
+stored in its invariant fields should also point to initialized objects.
+
+Think forward reachability
+
+**Global initialization??**
+
+if x is committed then objects pointing to x must also be committed
+
+Think forward + reverse reachability
+
+KeyFor?
+is ownership global?
+can you extend JOL for uniqueness
+
+* Example 1: Instance method invoked during construction where the receiver must be fully initialized
+
+This example demonstrates a classic Java hazard: a superclass constructor invokes a method
+that is overridden in a subclass. Because method dispatch is virtual, the subclass method
+may execute before the subclass constructor has established its invariants.
+
+#+BEGIN_SRC javac :classname Unchecked :dir /tmp/cf-init-demo
+  public class Unchecked {
+      public Unchecked() {
+  	init();           
+      }
+      protected void init() { }
+  }
+#+END_SRC
+
+#+RESULTS:
+: OK: javac /tmp/cf-init-demo/Unchecked.java 2>&1
+
+
+ #+BEGIN_SRC checker-javac :classname Checked :dir /tmp/cf-init-demo :sources "Unchecked.java" :flags "-processor org.checkerframework.checker.nullness.NullnessChecker"
+   import org.checkerframework.checker.nullness.qual.NonNull;
+
+   public class Checked extends Unchecked {
+       @NonNull String name;
+
+       public Checked(String n) {
+   	super();            
+   	this.name = n;
+       }
+
+       @Override protected void init() {
+   	// expects fully initialized receiver
+   	// the implicit 'this' is technically non-null so a runtime null check
+   	// doesn't help here
+   	// you could either inject a check in an override such as:
+   	// RuntimeInitChecks.assertInitialized(this);
+   	// or similar to bworld, enforce super calls after fields are initialized
+   	System.out.println(name.length());
+       }
+
+       public static void main(String[] args) {
+   	Checked willFail = new Checked("test");
+       }    
+   }
+#+END_SRC
+
+#+RESULTS:
+: FAILED (/home/alex/eisop/checker-framework/checker/bin/javac -processor org.checkerframework.checker.nullness.NullnessChecker /tmp/cf-init-demo/Checked.java /tmp/cf-init-demo/Unchecked.java 2>&1)
+: /tmp/cf-init-demo/Unchecked.java:3: error: [method.invocation.invalid] call to init() not allowed on the given receiver.
+:         init();
+:             ^
+:   found   : @UnderInitialization(Unchecked.class) Unchecked
+:   required: @Initialized Unchecked
+: 1 error
+
+
+* Example 2: Callback invoked before object initialization completes
+
+Another way objects may escape before their invariants are established is through callbacks.
+Unchecked code may accept a callback and invoke it before completing initialization.
+
+#+BEGIN_SRC java
+  public class Unchecked {
+      String randomString;
+
+      @FunctionalInterface
+      public interface Callback {
+  	void accept(Unchecked u);
+      }
+
+      public Unchecked(Callback cb) {
+  	// could inject here:
+  	// RuntimeInitChecks.assertInitialized(this);
+  	cb.accept(this);          // escape under construction (before initializing fields)
+  	this.randomString = "ok";
+      }
+  }
+#+END_SRC
+
+#+BEGIN_SRC java
+  public class Checked {
+      public static void main(String[] args) {
+  	new Unchecked(u -> {
+  		// could inject here:
+  		//   RuntimeInitChecks.assertInitialized(u);  
+  		System.out.println(u.randomString.length()); // NPE at runtime
+  	});
+      }
+#+END_SRC
+
+The constructor of Unchecked invokes the callback before assigning randomString.
+As a result the callback receives an object whose invariant field has not yet been initialized.
+The lambda therefore dereferences a null field.
+
+
+* Example 3: Deep initialization violation via invariant field
+
+A direct deep initialization violation occurs when a checked object stores a reference to an unchecked object whose invariants have not been established.
+
+#+BEGIN_SRC java
+  public class UncheckedDep {
+      String inner;  // default null
+      // a field could also be a reference type which would require further traversal of
+      // object graph 
+
+      public UncheckedDep() {
+          // does not initialize inner
+      }
+  }
+#+END_SRC
+
+#+BEGIN_SRC java
+    import org.checkerframework.checker.nullness.qual.NonNull;
+
+  public class Checked {
+      @NonNull UncheckedDep dep;  // non-null reference, but deep init is not guaranteed
+
+      public Checked(@NonNull UncheckedDep dep) {
+          this.dep = dep;         // shallow invariant satisfied: dep != null
+      }
+
+      public void use() {
+          // Deep initialization would require dep.inner to be non-null (and initialized).
+          System.out.println(dep.inner.length()); // NPE at runtime
+      }
+
+      public static void main(String[] args) {
+          UncheckedDep d = new UncheckedDep();
+          Checked c = new Checked(d);
+          c.use();
+      }
+  }
+  
+
+#+END_SRC
+
+
+* Example 4: Heap publication before initialization completes
+
+#+BEGIN_SRC java
+  public class CheckedUse {
+      public static void main(String[] args) {
+  	// Application registers a listener with the library.
+  	UncheckedFactory.setListener(new UncheckedFactory.Listener() {
+  		@Override public void onPublished() {
+  		    // Re-entrant callback from unchecked library code.
+  		    Unchecked u = UncheckedFactory.last;
+
+  		    // Runtime nullness checks could fail at u.value,
+  		    // but the semantic bug is "use before invariant establishment".
+  		    // A runtime init checker would insert:
+  		    //   RuntimeInitChecks.assertDeepInitialized(u);
+  		    System.out.println(u.value.length());
+  		}
+  	    });
+
+  	UncheckedFactory.get();
+      }
+  }
+#+END_SRC
+
+
+#+BEGIN_SRC java
+  public class UncheckedFactory {
+      static Unchecked last;
+
+      interface Listener { void onPublished(); }
+      private static Listener listener;
+
+      public static void setListener(Listener l) {
+  	listener = l;
+      }
+
+      public static Unchecked get() {
+  	Unchecked u = new Unchecked(); // allocation
+  	last = u;                      // publish early
+
+  	// library notifies observers; this is plausible in real systems
+  	if (listener != null) listener.onPublished();
+
+  	u.value = "ready";             // finish invariant
+  	return u;
+      }
+  }
+
+  class Unchecked {
+      String value; // default null
+  }
+#+END_SRC
+
+
+Unlike the UncheckedDep example, the root object here is not stored inside a checked object’s field. Instead, unchecked code publishes a reference to a global heap location, and then re-enters checked code, which reads that root and immediately traverses its fields. Deep initialization is still the relevant guarantee: checked code wants to assume that an initialized root implies initialized reachable state. The only difference is the source of the root: a heap location controlled by unchecked code rather than a checked-field assignment.
+
+
+* Example 5: Global init?
+
+#+BEGIN_SRC java
+  public class UncheckedDep {
+    String inner; // default null
+
+    public UncheckedDep() {
+        // does not initialize inner
+    }
+
+    public static UncheckedDep makeReady() {
+        UncheckedDep d = new UncheckedDep();
+        d.inner = "ok";
+        return d;
+    }
+}
+#+END_SRC
+
+#+BEGIN_SRC java
+  public class UncheckedMutator {
+
+      CheckedRoot r; 
+
+      public static void corrupt(CheckedRoot r) {
+          // Create an under-initialized object...
+          UncheckedDep d = new UncheckedDep();
+          // ...and store it into a field of an already-constructed checked object.
+          r.dep = d;     // <-- pollutes committed object graph
+  	// here d is nonnull, but not deeply initialized! 
+
+      }
+  }
+#+END_SRC
+
+#+BEGIN_SRC java
+  import org.checkerframework.checker.nullness.qual.NonNull;
+
+  public class CheckedRoot {
+
+      // Checked invariant: dep is non-null
+      public @NonNull UncheckedDep dep;
+
+      public CheckedRoot() {
+          // Assume unchecked factory returns a "ready" object.
+          // In gradual system, you'd insert a boundary deep-init check here:
+          //   RuntimeInitChecks.assertDeepInitialized(dep);
+          dep = UncheckedDep.makeReady();
+      }
+
+      public int use() {
+          // If unchecked code mutated dep to point at an under-init object,
+          // boundary-only checks will not fire at this dereference.
+          return dep.inner.length(); // NPE if inner is null
+  	// where does dep come from? depending on where, you may or may not inject a check 
+      }
+
+      public static void main(String[] args) {
+          CheckedRoot r = new CheckedRoot();
+
+          // Boundary: checked -> unchecked (passing an initialized root to unchecked code)
+          UncheckedMutator.corrupt(r);
+
+          // Later, checked code uses r again *without crossing a boundary*
+          System.out.println(r.use());
+      }
+  }
+#+END_SRC
+
+UncheckedMutator
+        |
+        v
+        r ───► dep ───► "ok"
