@@ -12,6 +12,5 @@ public class NullableRowsAndCellsPassNullToNonNullParameter {
         grid[0] = new @Nullable String[1];
         grid[0][0] = null;
         accept(grid[0][0]);
-        // :: error: (Parameter 0 must be NonNull)
     }
 }

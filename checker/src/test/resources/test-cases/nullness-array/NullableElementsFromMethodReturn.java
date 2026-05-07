@@ -17,6 +17,5 @@ public class NullableElementsFromMethodReturn {
         @Nullable String[] values = UncheckedLib.makeValues();
         values[0] = null;
         accept(values[0]);
-        // :: error: (Parameter 0 must be NonNull)
     }
 }

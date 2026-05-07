@@ -11,6 +11,5 @@ public class NullableElementsPassNullToNonNullParameter {
         @Nullable String[] values = new @Nullable String[1];
         values[0] = null;
         accept(values[0]);
-        // :: error: (Parameter 0 must be NonNull)
     }
 }

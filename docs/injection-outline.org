@@ -25,12 +25,27 @@
 | Checked static/final/private call         | Leave alone for first experiment     | No dynamic dispatch; direct safe calls can come later      |
 | Constructor call                          | Leave unchanged                      | Constructor/object initialization rules stay untouched     |
 
+
+* Note on syntheic bridge methods
+
+- Checked receiver exposing unchecked implementation: protect checked clients from unchecked inherited behavior.
+- Unchecked receiver calling checked implementation: protect checked code from unchecked arguments.
+
+One nuance: these bridges are only valid when Java lets us override the inherited method. They work for ordinary inherited instance methods. They do not work for `final`, `static`, `private`, or constructor behavior, which is why the call-site return check is still needed in some cases.
+
+So I think the bridge design is defensible. It is basically making inheritance itself an explicit checked/unchecked boundary instead of letting unchecked superclass code leak through a checked subclass API invisibly.
+
+* Virtual dispatch
+
+For any checked call site rewritten to the safe branch, every checked runtime receiver that can satisfy the original dispatch must also dispatch the corresponding `$runtimeframework$safe` call to a safe method containing the same body as that receiver’s original dispatch target.
+
+This means we also need to method split on final methods, as they will need a corresponding $safe version. 
+
 * invoke dynamic
 
 the invoke dynamic instrcution has the following pattern:
 
 invokedynamic process:(LCheckedService;Ljava/lang/String;)V
-
 
 Here, process is the call-site name, and the call-site descriptor explicitly includes the static receiver type as its first parameter. In this example, the call site has type:
 
@@ -57,4 +72,13 @@ However, both instructions consume the same runtime values from the operand stac
 
 where argk is at the top of the stack.
 
-An invokevirtual instruction refers to a symbolic method reference, consisting of an owner class, method name, and method descriptor. By contrast, an invokedynamic instruction describes a dynamic call site, consisting of a bootstrap method, a call-site name, a call-site descriptor, and optional static bootstrap arguments. The bootstrap method is responsible for linking the call site to an actual target.
+
+Yes, I’d add a few more items.
+
+Your current TODO list plus these two gives the remaining set I would track:
+
+1. Public-only safe splitting.
+2. Bootstrap guard requires checked marker on concrete receiver.
+3. Rewrite eligibility checks checked-ness on bytecode owner before resolved target.
+4. Abstract checked class safe stubs missing.
+5. Bridge-safe forwarding should emit with the resolved owner, not only validate with it.
