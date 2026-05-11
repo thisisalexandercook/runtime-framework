@@ -666,7 +666,10 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
         case INVOKEINTERFACE ->
             resolutionEnvironment.findResolvedInterfaceMethod(
                 ownerInternalName, methodName, descriptor.descriptorString(), loader);
-        case INVOKESTATIC, INVOKESPECIAL ->
+        case INVOKESTATIC ->
+            resolutionEnvironment.findResolvedStaticMethod(
+                ownerInternalName, methodName, descriptor.descriptorString(), loader);
+        case INVOKESPECIAL ->
             resolutionEnvironment
                 .loadClass(ownerInternalName, loader)
                 .flatMap(

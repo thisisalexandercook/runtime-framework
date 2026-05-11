@@ -83,6 +83,25 @@ public interface ResolutionEnvironment {
     return Optional.empty();
   }
 
+  default Optional<ResolvedMethod> findResolvedStaticMethod(
+      String ownerInternalName, String methodName, String descriptor, ClassLoader loader) {
+    Optional<ClassModel> current = loadClass(ownerInternalName, loader);
+    while (current.isPresent()) {
+      ClassModel model = current.get();
+      Optional<MethodModel> method = findMethod(model, methodName, descriptor)
+          .filter(candidate -> Modifier.isStatic(candidate.flags().flagsMask()));
+      if (method.isPresent()) {
+        return Optional.of(
+            new ResolvedMethod(model.thisClass().asInternalName(), model, method.get()));
+      }
+      if (Modifier.isInterface(model.flags().flagsMask())) {
+        return Optional.empty();
+      }
+      current = loadSuperclass(model, loader);
+    }
+    return Optional.empty();
+  }
+
   default Optional<ResolvedMethod> findResolvedInterfaceMethod(
       String ownerInternalName, String methodName, String descriptor, ClassLoader loader) {
     return loadClass(ownerInternalName, loader)
