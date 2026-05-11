@@ -486,7 +486,9 @@ public class EnforcementTransform implements CodeTransform {
               || EnforcementInstrumenter.isInterfaceSafeStubCandidate(target));
     }
     if (!EnforcementInstrumenter.isSplitCandidate(target)) {
-      return false;
+      return opcode == Opcode.INVOKEVIRTUAL
+          && !targetIsStatic
+          && EnforcementInstrumenter.isAbstractClassSafeStubCandidate(target);
     }
     return (opcode == Opcode.INVOKESTATIC) == targetIsStatic;
   }

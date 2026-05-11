@@ -155,6 +155,15 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
             transformMethod(
                 classBuilder, classModel, methodModel, loader, isCheckedScope, returnCheckRegistry);
           }
+        } else if (classElement instanceof MethodModel methodModel) {
+          classBuilder.with(classElement);
+          if (isAbstractClassSafeStubCandidate(methodModel)
+              && !hasSafeMethodCollision(classModel, methodModel)) {
+            emitSafeStub(
+                classBuilder,
+                methodModel,
+                "Checked abstract safe method has no checked implementation");
+          }
         } else {
           classBuilder.with(classElement);
         }
@@ -196,7 +205,10 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
           } else {
             classBuilder.with(classElement);
             if (isInterfaceSafeStubCandidate(methodModel) && !hasSafeCollision) {
-              emitInterfaceSafeStub(classBuilder, methodModel);
+              emitSafeStub(
+                  classBuilder,
+                  methodModel,
+                  "Checked interface safe method has no checked implementation");
             }
           }
         } else {
@@ -389,7 +401,7 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
         ClassDesc.ofDescriptor(methodModel.methodTypeSymbol().returnType().descriptorString()));
   }
 
-  private void emitInterfaceSafeStub(ClassBuilder builder, MethodModel methodModel) {
+  private void emitSafeStub(ClassBuilder builder, MethodModel methodModel, String message) {
     String originalName = methodModel.methodName().stringValue();
     MethodTypeDesc desc = methodModel.methodTypeSymbol();
     int stubFlags =
@@ -406,7 +418,7 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
                     codeBuilder
                         .new_(ASSERTION_ERROR)
                         .dup()
-                        .ldc("Checked interface safe method has no checked implementation")
+                        .ldc(message)
                         .invokespecial(
                             ASSERTION_ERROR, "<init>", ASSERTION_ERROR_STRING_CTOR)
                         .athrow()));
@@ -535,16 +547,26 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
   }
 
   static boolean isInterfaceSafeStubCandidate(MethodModel method) {
+    return isAbstractInstanceMethodWithoutCode(method)
+        && Modifier.isPublic(method.flags().flagsMask());
+  }
+
+  static boolean isAbstractClassSafeStubCandidate(MethodModel method) {
+    return isAbstractInstanceMethodWithoutCode(method)
+        && !Modifier.isPrivate(method.flags().flagsMask());
+  }
+
+  private static boolean isAbstractInstanceMethodWithoutCode(MethodModel method) {
     String methodName = method.methodName().stringValue();
     int flags = method.flags().flagsMask();
     return method.code().isEmpty()
         && !methodName.equals("<init>")
         && !methodName.equals("<clinit>")
         && !methodName.contains("$runtimeframework$safe")
-        && Modifier.isPublic(flags)
         && Modifier.isAbstract(flags)
         && !Modifier.isStatic(flags)
-        && !Modifier.isPrivate(flags)
+        && !Modifier.isNative(flags)
+        && !Modifier.isFinal(flags)
         && (flags & AccessFlag.BRIDGE.mask()) == 0
         && (flags & AccessFlag.SYNTHETIC.mask()) == 0;
   }
@@ -597,16 +619,22 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
       }
 
       String ownerInternalName = invoke.owner().asInternalName();
-      if (policy == null
-          || !policy.isChecked(new ClassInfo(ownerInternalName, loader, null))
-          || !hasSafeForwardTarget(ownerInternalName, methodName, invoke.typeSymbol(), opcode)) {
+      if (policy == null || !policy.isChecked(new ClassInfo(ownerInternalName, loader, null))) {
         return false;
       }
 
-      ClassDesc owner = ClassDesc.ofInternalName(ownerInternalName);
+      Optional<ResolutionEnvironment.ResolvedMethod> safeForwardTarget =
+          safeForwardTarget(ownerInternalName, methodName, invoke.typeSymbol(), opcode);
+      if (safeForwardTarget.isEmpty()) {
+        return false;
+      }
+
+      ResolutionEnvironment.ResolvedMethod target = safeForwardTarget.get();
+      ClassDesc owner = ClassDesc.ofInternalName(target.ownerInternalName());
       String safeName = safeMethodName(methodName);
       if (opcode == Opcode.INVOKESTATIC) {
-        builder.invokestatic(owner, safeName, invoke.typeSymbol(), invoke.isInterface());
+        builder.invokestatic(
+            owner, safeName, invoke.typeSymbol(), isInterface(target.ownerModel()));
       } else if (opcode == Opcode.INVOKEINTERFACE) {
         builder.invokeinterface(owner, safeName, invoke.typeSymbol());
       } else if (opcode == Opcode.INVOKESPECIAL) {
@@ -617,7 +645,7 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
       return true;
     }
 
-    private boolean hasSafeForwardTarget(
+    private Optional<ResolutionEnvironment.ResolvedMethod> safeForwardTarget(
         String ownerInternalName, String methodName, MethodTypeDesc descriptor, Opcode opcode) {
       return resolveSafeForwardTarget(ownerInternalName, methodName, descriptor, opcode)
           .filter(
@@ -626,8 +654,7 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
                       new ClassInfo(method.ownerInternalName(), loader, null),
                       method.ownerModel()))
           .filter(method -> EnforcementInstrumenter.isSplitCandidate(method.method()))
-          .filter(method -> methodMatchesOpcode(method.method(), opcode))
-          .isPresent();
+          .filter(method -> methodMatchesOpcode(method.method(), opcode));
     }
 
     private Optional<ResolutionEnvironment.ResolvedMethod> resolveSafeForwardTarget(
