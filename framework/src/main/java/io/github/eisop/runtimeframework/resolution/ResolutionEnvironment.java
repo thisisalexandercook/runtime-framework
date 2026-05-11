@@ -70,17 +70,14 @@ public interface ResolutionEnvironment {
       current = loadSuperclass(model, loader);
     }
 
+    List<ResolvedMethod> interfaceCandidates = new ArrayList<>();
     Set<String> visitedInterfaces = new HashSet<>();
     for (ClassModel model : hierarchy) {
-      Optional<ResolvedMethod> defaultMethod =
-          findResolvedInterfaceDefaultFromClass(
-              model, methodName, descriptor, loader, visitedInterfaces);
-      if (defaultMethod.isPresent()) {
-        return defaultMethod;
-      }
+      collectResolvedInterfaceMethodsFromClass(
+          model, methodName, descriptor, loader, visitedInterfaces, interfaceCandidates);
     }
 
-    return Optional.empty();
+    return selectMaximallySpecificDefault(interfaceCandidates, loader);
   }
 
   default Optional<ResolvedMethod> findResolvedStaticMethod(
@@ -88,8 +85,9 @@ public interface ResolutionEnvironment {
     Optional<ClassModel> current = loadClass(ownerInternalName, loader);
     while (current.isPresent()) {
       ClassModel model = current.get();
-      Optional<MethodModel> method = findMethod(model, methodName, descriptor)
-          .filter(candidate -> Modifier.isStatic(candidate.flags().flagsMask()));
+      Optional<MethodModel> method =
+          findMethod(model, methodName, descriptor)
+              .filter(candidate -> Modifier.isStatic(candidate.flags().flagsMask()));
       if (method.isPresent()) {
         return Optional.of(
             new ResolvedMethod(model.thisClass().asInternalName(), model, method.get()));
@@ -141,63 +139,127 @@ public interface ResolutionEnvironment {
     return Optional.empty();
   }
 
-  private Optional<MethodModel> findMethod(
-      ClassModel model, String methodName, String descriptor) {
+  private Optional<MethodModel> findMethod(ClassModel model, String methodName, String descriptor) {
     return model.methods().stream()
         .filter(method -> method.methodName().stringValue().equals(methodName))
         .filter(method -> method.methodTypeSymbol().descriptorString().equals(descriptor))
         .findFirst();
   }
 
-  private Optional<ResolvedMethod> findResolvedInterfaceDefaultFromClass(
+  private void collectResolvedInterfaceMethodsFromClass(
       ClassModel classModel,
       String methodName,
       String descriptor,
       ClassLoader loader,
-      Set<String> visitedInterfaces) {
+      Set<String> visitedInterfaces,
+      List<ResolvedMethod> candidates) {
     for (var interfaceEntry : classModel.interfaces()) {
-      Optional<ResolvedMethod> resolved =
-          loadClass(interfaceEntry.asInternalName(), loader)
-              .flatMap(
-                  interfaceModel ->
-                      findResolvedInterfaceDefaultMethod(
-                          interfaceModel, methodName, descriptor, loader, visitedInterfaces));
-      if (resolved.isPresent()) {
-        return resolved;
-      }
+      loadClass(interfaceEntry.asInternalName(), loader)
+          .ifPresent(
+              interfaceModel ->
+                  collectResolvedInterfaceMethods(
+                      interfaceModel,
+                      methodName,
+                      descriptor,
+                      loader,
+                      visitedInterfaces,
+                      candidates));
     }
-    return Optional.empty();
   }
 
-  private Optional<ResolvedMethod> findResolvedInterfaceDefaultMethod(
+  private void collectResolvedInterfaceMethods(
       ClassModel interfaceModel,
       String methodName,
       String descriptor,
       ClassLoader loader,
-      Set<String> visitedInterfaces) {
+      Set<String> visitedInterfaces,
+      List<ResolvedMethod> candidates) {
     String internalName = interfaceModel.thisClass().asInternalName();
     if (!visitedInterfaces.add(internalName)) {
-      return Optional.empty();
+      return;
     }
 
     Optional<MethodModel> candidate = findMethod(interfaceModel, methodName, descriptor);
-    if (candidate.isPresent() && isInterfaceDefaultMethod(candidate.get())) {
-      return Optional.of(new ResolvedMethod(internalName, interfaceModel, candidate.get()));
+    if (candidate.isPresent() && isInterfaceInstanceMethod(candidate.get())) {
+      candidates.add(new ResolvedMethod(internalName, interfaceModel, candidate.get()));
     }
 
     for (var parent : interfaceModel.interfaces()) {
-      Optional<ResolvedMethod> resolved =
-          loadClass(parent.asInternalName(), loader)
-              .flatMap(
-                  parentModel ->
-                      findResolvedInterfaceDefaultMethod(
-                          parentModel, methodName, descriptor, loader, visitedInterfaces));
-      if (resolved.isPresent()) {
-        return resolved;
+      loadClass(parent.asInternalName(), loader)
+          .ifPresent(
+              parentModel ->
+                  collectResolvedInterfaceMethods(
+                      parentModel, methodName, descriptor, loader, visitedInterfaces, candidates));
+    }
+  }
+
+  private Optional<ResolvedMethod> selectMaximallySpecificDefault(
+      List<ResolvedMethod> candidates, ClassLoader loader) {
+    Optional<ResolvedMethod> selected = Optional.empty();
+    for (ResolvedMethod candidate : maximallySpecific(candidates, loader)) {
+      if (!isInterfaceDefaultMethod(candidate.method())) {
+        continue;
+      }
+      if (selected.isPresent()) {
+        return Optional.empty();
+      }
+      selected = Optional.of(candidate);
+    }
+    return selected;
+  }
+
+  private List<ResolvedMethod> maximallySpecific(
+      List<ResolvedMethod> candidates, ClassLoader loader) {
+    List<ResolvedMethod> maximallySpecific = new ArrayList<>();
+    for (ResolvedMethod candidate : candidates) {
+      if (isLessSpecificThanAnotherCandidate(candidate, candidates, loader)) {
+        continue;
+      }
+      maximallySpecific.add(candidate);
+    }
+    return maximallySpecific;
+  }
+
+  private boolean isLessSpecificThanAnotherCandidate(
+      ResolvedMethod candidate, List<ResolvedMethod> candidates, ClassLoader loader) {
+    for (ResolvedMethod other : candidates) {
+      if (!candidate.ownerInternalName().equals(other.ownerInternalName())
+          && interfaceExtends(
+              other.ownerInternalName(), candidate.ownerInternalName(), loader, new HashSet<>())) {
+        return true;
       }
     }
+    return false;
+  }
 
-    return Optional.empty();
+  private boolean interfaceExtends(
+      String childInternalName,
+      String parentInternalName,
+      ClassLoader loader,
+      Set<String> visited) {
+    if (childInternalName.equals(parentInternalName)) {
+      return true;
+    }
+    if (!visited.add(childInternalName)) {
+      return false;
+    }
+    Optional<ClassModel> child = loadClass(childInternalName, loader);
+    if (child.isEmpty()) {
+      return false;
+    }
+    for (var parent : child.get().interfaces()) {
+      String parentName = parent.asInternalName();
+      if (parentName.equals(parentInternalName)
+          || interfaceExtends(parentName, parentInternalName, loader, visited)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private boolean isInterfaceInstanceMethod(MethodModel method) {
+    int flags = method.flags().flagsMask();
+    return !Modifier.isStatic(flags) && !Modifier.isPrivate(flags);
   }
 
   private boolean isInterfaceDefaultMethod(MethodModel method) {

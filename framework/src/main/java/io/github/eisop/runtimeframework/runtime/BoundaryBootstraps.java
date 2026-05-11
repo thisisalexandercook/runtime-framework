@@ -8,8 +8,10 @@ import java.lang.invoke.MethodType;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /** Bootstrap methods used by invokedynamic. */
@@ -47,8 +49,7 @@ public final class BoundaryBootstraps {
     MethodHandle safe = callerLookup.findVirtual(owner, safeName, originalType).asType(invokedType);
     MethodHandle original =
         callerLookup.findVirtual(owner, originalName, originalType).asType(invokedType);
-    MethodHandle test =
-        safeDispatchTest(owner, originalName, safeName, originalType, invokedType);
+    MethodHandle test = safeDispatchTest(owner, originalName, safeName, originalType, invokedType);
 
     return new ConstantCallSite(MethodHandles.guardWithTest(test, safe, original));
   }
@@ -66,8 +67,7 @@ public final class BoundaryBootstraps {
     MethodHandle safe = callerLookup.findVirtual(owner, safeName, originalType).asType(invokedType);
     MethodHandle original = callerLookup.findVirtual(owner, originalName, originalType);
     original = MethodHandles.filterReturnValue(original, fallbackReturnFilter).asType(invokedType);
-    MethodHandle test =
-        safeDispatchTest(owner, originalName, safeName, originalType, invokedType);
+    MethodHandle test = safeDispatchTest(owner, originalName, safeName, originalType, invokedType);
 
     return new ConstantCallSite(MethodHandles.guardWithTest(test, safe, original));
   }
@@ -166,36 +166,69 @@ public final class BoundaryBootstraps {
     }
 
     private DispatchTarget interfaceDefaultTarget(Class<?> receiverClass, String name) {
+      List<DispatchTarget> candidates = new ArrayList<>();
       Set<Class<?>> visited = new HashSet<>();
       for (Class<?> current = receiverClass; current != null; current = current.getSuperclass()) {
         for (Class<?> candidate : current.getInterfaces()) {
-          DispatchTarget target = interfaceDefaultTarget(candidate, name, visited);
-          if (target != null) {
-            return target;
-          }
+          collectInterfaceTargets(candidate, name, visited, candidates);
         }
       }
-      return interfaceDefaultTarget(owner, name, visited);
+      collectInterfaceTargets(owner, name, visited, candidates);
+      return selectMaximallySpecificDefault(candidates);
     }
 
-    private DispatchTarget interfaceDefaultTarget(
-        Class<?> interfaceClass, String name, Set<Class<?>> visited) {
+    private void collectInterfaceTargets(
+        Class<?> interfaceClass,
+        String name,
+        Set<Class<?>> visited,
+        List<DispatchTarget> candidates) {
       if (!interfaceClass.isInterface() || !visited.add(interfaceClass)) {
-        return null;
+        return;
       }
 
       Method method = declaredMethod(interfaceClass, name);
-      if (method != null && method.isDefault()) {
-        return new DispatchTarget(interfaceClass, method);
+      if (method != null && isInstanceDispatchMethod(method)) {
+        candidates.add(new DispatchTarget(interfaceClass, method));
       }
 
       for (Class<?> parent : interfaceClass.getInterfaces()) {
-        DispatchTarget target = interfaceDefaultTarget(parent, name, visited);
-        if (target != null) {
-          return target;
+        collectInterfaceTargets(parent, name, visited, candidates);
+      }
+    }
+
+    private DispatchTarget selectMaximallySpecificDefault(List<DispatchTarget> candidates) {
+      DispatchTarget selected = null;
+      for (DispatchTarget candidate : maximallySpecific(candidates)) {
+        if (!candidate.method().isDefault()) {
+          continue;
+        }
+        if (selected != null) {
+          return null;
+        }
+        selected = candidate;
+      }
+      return selected;
+    }
+
+    private List<DispatchTarget> maximallySpecific(List<DispatchTarget> candidates) {
+      List<DispatchTarget> maximallySpecific = new ArrayList<>();
+      for (DispatchTarget candidate : candidates) {
+        if (isLessSpecificThanAnotherCandidate(candidate, candidates)) {
+          continue;
+        }
+        maximallySpecific.add(candidate);
+      }
+      return maximallySpecific;
+    }
+
+    private boolean isLessSpecificThanAnotherCandidate(
+        DispatchTarget candidate, List<DispatchTarget> candidates) {
+      for (DispatchTarget other : candidates) {
+        if (!candidate.equals(other) && candidate.owner().isAssignableFrom(other.owner())) {
+          return true;
         }
       }
-      return null;
+      return false;
     }
 
     private Method declaredMethod(Class<?> declaringClass, String name) {
