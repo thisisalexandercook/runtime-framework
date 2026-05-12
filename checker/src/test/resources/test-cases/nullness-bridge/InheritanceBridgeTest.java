@@ -14,7 +14,6 @@ public class InheritanceBridgeTest extends UncheckedParent {
 
         test.overrideMe("safe", "safe");
 
-        // :: error: (Parameter 0 must be NonNull)
         test.overrideMe(null, "unsafe");
 
         test.overrideMe("safe", "null");

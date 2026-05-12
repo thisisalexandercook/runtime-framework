@@ -1,0 +1,189 @@
+| Check                                       | Flow event              | Injection point               | Injected when                              | Blame    |
+|---------------------------------------------+-------------------------+-------------------------------+--------------------------------------------+----------|
+| Checked method parameter                    | =MethodParameter=       | method entry                  | Enclosing class is checked                 | =CALLER= |
+| Checked method return                       | =MethodReturn=          | before normal return          | Enclosing class is checked                 | =LOCAL=  |
+| Checked caller receives unchecked return    | =BoundaryCallReturn=    | after invoke                  | Checked caller invokes unchecked owner     | =LOCAL=  |
+| Checked method field read                   | =FieldRead=             | after =GETFIELD=/=GETSTATIC=  | Checked method reads same/unchecked owner  | =LOCAL=  |
+| Write into checked field                    | =FieldWrite=            | before =PUTFIELD=/=PUTSTATIC= | Global mode writes into checked owner      | =LOCAL=  |
+| Checked method array load                   | =ArrayLoad=             | after =AALOAD=                | Enclosing method is checked                | =LOCAL=  |
+| Array store                                 | =ArrayStore=            | before =AASTORE=              | Any transformed class                      | =LOCAL=  |
+| Checked local reference store               | =LocalStore=            | before =ASTORE=               | Enclosing method is checked                | =LOCAL=  |
+| Synthetic inherited-method bridge parameter | bridge parameter action | bridge entry                  | Checked class inherits unchecked method    | =CALLER= |
+| Synthetic inherited-method bridge return    | bridge return action    | bridge exit                   | Checked class inherits unchecked method    | =CALLER= |
+| Unchecked override parameter                | =OverrideParameter=     | method entry                  | Global mode, unchecked override of checked | =CALLER= |
+| Unchecked override return                   | =OverrideReturn=        | before normal return          | Global mode, unchecked override of checked | =LOCAL=  |
+
+* First invokedynamic experiment: checked parameter boundary elision
+
+| Scenario                                  | What we instrument                   | What happens                                               |
+|-------------------------------------------+--------------------------------------+------------------------------------------------------------|
+| Checked caller -> checked receiver        | Rewrite call site to =invokedynamic= | Indy calls the checked receiver's safe body                |
+| Checked caller -> unchecked receiver      | Rewrite call site to =invokedynamic= | Indy calls the original method and applies return checks   |
+| Unchecked caller -> checked receiver      | Do not rewrite call site             | Normal dispatch reaches the public wrapper; params checked |
+| Unchecked caller -> unchecked receiver    | Do not rewrite call site             | Normal dispatch runs as today                             |
+| Uninstrumented caller -> checked receiver | Cannot rewrite call site             | Normal dispatch reaches the public wrapper; params checked |
+| Checked static/final/private call         | Leave alone for first experiment     | No dynamic dispatch; direct safe calls can come later      |
+| Constructor call                          | Leave unchanged                      | Constructor/object initialization rules stay untouched     |
+
+
+* Note on syntheic bridge methods
+
+- Checked receiver exposing unchecked implementation: protect checked clients from unchecked inherited behavior.
+- Unchecked receiver calling checked implementation: protect checked code from unchecked arguments.
+
+One nuance: these bridges are only valid when Java lets us override the inherited method. They work for ordinary inherited instance methods. They do not work for `final`, `static`, `private`, or constructor behavior, which is why the call-site return check is still needed in some cases.
+
+So I think the bridge design is defensible. It is basically making inheritance itself an explicit checked/unchecked boundary instead of letting unchecked superclass code leak through a checked subclass API invisibly.
+
+* Virtual dispatch
+
+For any checked call site rewritten to the safe branch, every checked runtime receiver that can satisfy the original dispatch must also dispatch the corresponding `$runtimeframework$safe` call to a safe method containing the same body as that receiver’s original dispatch target.
+
+This means we also need to method split on final methods, as they will need a corresponding $safe version. 
+
+* invoke dynamic
+
+An ~invokedynamic~ instruction names a dynamically linked call site rather than a concrete method. The meaning of the call site is determined by a bootstrap method, which links the call site to a target ~MethodHandle~.
+
+A call site can be used to implement many different language-level operations, such as lambda expressions, string concatenation, dynamic-language dispatch, or custom runtime dispatch logic. In our case, we are interested in using it to represent an instance-like call to ~process~:
+
+#+BEGIN_SRC text
+invokedynamic process:(LCheckedService;Ljava/lang/String;)V
+#+END_SRC
+
+Here, ~process~ is the call-site name, and the descriptor gives the complete call-site type:
+
+#+BEGIN_SRC text
+(CheckedService, String) -> void
+#+END_SRC
+
+The first parameter, ~CheckedService~, represents the receiver object. This is necessary because this particular call site is being used in an instance-like way. Unlike ~invokevirtual~, ~invokedynamic~ does not have a symbolic method owner that separately identifies the receiver type. The call-site descriptor must therefore include every value consumed by the call site, including the receiver.
+
+For an ~invokevirtual~ call:
+
+#+BEGIN_SRC text
+invokevirtual CheckedService.process:(Ljava/lang/String;)V
+#+END_SRC
+
+the receiver type is encoded in the symbolic method reference owner, ~CheckedService~, and is omitted from the method descriptor itself. The descriptor only lists the ordinary source-level method parameters:
+
+#+BEGIN_SRC text
+(String) -> void
+#+END_SRC
+
+The descriptor only lists the ordinary source-level method parameters:
+
+#+BEGIN_SRC text
+(String) -> void
+#+END_SRC
+
+However, both instructions consume the same runtime values from the operand stack. Just before the call, the stack has the shape:
+
+#+BEGIN_SRC text
+...
+receiver
+arg1
+arg2
+...
+argk
+#+END_SRC
+
+where ~argk~ is at the top of the stack.
+
+The difference is therefore not the runtime stack shape. The difference is how the receiver is represented in the bytecode metadata. With ~invokevirtual~, the receiver type is represented by the symbolic method owner. With ~invokedynamic~, there is no such owner, so if the call site is instance-like, the receiver must be represented as an explicit parameter in the call-site descriptor.
+
+The first time a particular dynamic call site is resolved, the JVM invokes its associated bootstrap method. Conceptually, the JVM passes three leading arguments:
+
+#+BEGIN_SRC text
+MethodHandles.Lookup callerLookup
+String invokedName
+MethodType invokedType
+#+END_SRC
+
+The ~callerLookup~ object represents the class containing the ~invokedynamic~ instruction and controls access-sensitive lookup. The ~invokedName~ is the call-site name, such as ~"process"~. The ~invokedType~ is the call-site type, such as:
+
+#+BEGIN_SRC text
+(CheckedService, String) -> void
+#+END_SRC
+
+The JVM then appends any static bootstrap arguments encoded for that call site. For example, in our setting these might include the checked target owner, the original method name, the safe method name, the original method type, and sometimes a fallback return-filter handle.
+
+~MethodHandles~ is a Java API in ~java.lang.invoke~ for working with method handles. A method handle is a strongly typed, directly executable reference to some computation. It can refer to things such as:
+
+#+BEGIN_SRC java
+someObject.instanceMethod(...)
+SomeClass.staticMethod(...)
+someObject.field
+SomeClass.staticField
+new SomeClass(...)
+array[index]
+#+END_SRC
+
+In some ways, a method handle is like a safer, more structured function pointer. The ~MethodHandles~ API acts as a factory/helper API used to find, adapt, and compose method handles.
+
+
+For example:
+
+#+BEGIN_SRC java
+MethodHandles.Lookup lookup = MethodHandles.lookup();
+
+MethodHandle mh =
+    lookup.findVirtual(
+        CheckedService.class,
+        "process",
+        MethodType.methodType(void.class, String.class)
+    );
+#+END_SRC
+
+This finds a handle to the instance method:
+
+#+BEGIN_SRC java
+void CheckedService.process(String)
+#+END_SRC
+
+The resulting method handle has type:
+
+#+BEGIN_SRC text
+(CheckedService, String) -> void
+#+END_SRC
+
+The linkage information for an ~invokedynamic~ instruction is stored in the class file. Conceptually, it looks something like:
+
+#+BEGIN_SRC text
+InvokeDynamic:
+  name: process
+  descriptor: (LCheckedService;Ljava/lang/String;)V
+  bootstrap method: MyBootstrap.bootstrap
+  static bootstrap args: ...
+#+END_SRC
+
+More precisely, the ~invokedynamic~ instruction uses two operand bytes as an index into the run-time constant pool of the current class. That entry is a symbolic reference to a call site specifier. Resolving that call site specifier produces the bootstrap method handle, the call-site ~MethodType~, and any static bootstrap arguments.
+
+The bootstrap method is invoked as if through ~MethodHandle.invoke~. The JVM supplies the bootstrap method handle itself, the ~Lookup~ object, the call-site name, the call-site ~MethodType~, and then the static bootstrap arguments. The static bootstrap arguments may be classes, method handles, method types, strings, or primitive numeric constants.
+
+A bootstrap method must return a ~CallSite~. A ~CallSite~ is an object that holds the target ~MethodHandle~ for this particular linked ~invokedynamic~ instruction. The call-site object's type descriptor must be semantically equal to the ~MethodType~ obtained from the call-site descriptor, and the target method handle is invoked as if by ~MethodHandle.invokeExact~ with that descriptor.
+
+For example, a bootstrap might return:
+
+#+BEGIN_SRC java
+return new ConstantCallSite(target);
+#+END_SRC
+
+A ~ConstantCallSite~ means that the call site's target is fixed after linkage. After successful resolution, the resulting call site object is permanently bound to that dynamic call site.
+
+The target method handle can also be built by composing other method handles. For example:
+
+#+BEGIN_SRC java
+return new ConstantCallSite(
+    MethodHandles.guardWithTest(test, safe, original)
+);
+#+END_SRC
+
+Here, ~guardWithTest~ is a method-handle combinator. It creates a new method handle that first runs ~test~. If the test succeeds, it invokes ~safe~; otherwise, it invokes ~original~.
+
+This is useful when an ~invokedynamic~ call site should dispatch between two possible targets. For example, in a gradual nullness implementation, the test might determine whether the call can use a fast checked path or must fall back to a guarded path with runtime checks.
+
+
+later improvement:
+
+2. **More efficient later:** use a polymorphic inline cache with a `MutableCallSite`, specializing the call site for observed receiver classes. That can avoid a `ClassValue` lookup on hot monomorphic sites, but it is more complex and still needs a correct resolver.

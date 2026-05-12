@@ -1,5 +1,6 @@
 package io.github.eisop.runtimeframework.agent;
 
+import io.github.eisop.runtimeframework.config.RuntimeOptions;
 import io.github.eisop.runtimeframework.core.RuntimeChecker;
 import io.github.eisop.runtimeframework.filter.ClassInfo;
 import io.github.eisop.runtimeframework.instrumentation.RuntimeInstrumenter;
@@ -16,8 +17,12 @@ public class RuntimeTransformer implements ClassFileTransformer {
   private final RuntimeInstrumenter instrumenter;
 
   public RuntimeTransformer(RuntimePolicy policy, RuntimeChecker checker) {
+    this(policy, checker, RuntimeOptions.fromSystemProperties());
+  }
+
+  public RuntimeTransformer(RuntimePolicy policy, RuntimeChecker checker, RuntimeOptions options) {
     this.policy = policy;
-    this.instrumenter = checker.createInstrumenter(policy);
+    this.instrumenter = checker.createInstrumenter(policy, options);
   }
 
   @Override

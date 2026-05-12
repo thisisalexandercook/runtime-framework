@@ -11,6 +11,5 @@ public class NullableCellsTwoDimensional {
         @Nullable String[][] grid = new @Nullable String[1][1];
         grid[0][0] = null;
         accept(grid[0][0]);
-        // :: error: (Parameter 0 must be NonNull)
     }
 }

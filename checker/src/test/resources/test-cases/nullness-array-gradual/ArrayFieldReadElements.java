@@ -15,6 +15,5 @@ public class ArrayFieldReadElements {
         UncheckedLib lib = new UncheckedLib();
         lib.values[0] = null;
         accept(lib.values[0]);
-        // :: error: (Parameter 0 must be NonNull)
     }
 }

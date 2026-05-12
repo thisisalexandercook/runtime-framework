@@ -1,5 +1,6 @@
 package io.github.eisop.testutils;
 
+import io.github.eisop.runtimeframework.config.RuntimeOptions;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -14,6 +15,8 @@ import org.junit.jupiter.api.Assertions;
 public class RuntimeTestRunner extends AgentTestHarness {
 
   private static final Pattern ERROR_PATTERN = Pattern.compile("//\\s*::\\s*error:\\s*\\((.*)\\)");
+  private static final Pattern PACKAGE_PATTERN =
+      Pattern.compile("(?m)^\\s*package\\s+([\\w.]+)\\s*;");
 
   public void runDirectoryTest(String dirName, String checkerClass, boolean isGlobal)
       throws Exception {
@@ -79,17 +82,25 @@ public class RuntimeTestRunner extends AgentTestHarness {
     }
 
     String filename = mainSource.getFileName().toString();
-    String mainClass = filename.replace(".java", "");
+    String mainClass = mainClassName(mainSource);
 
     TestResult result =
         runAgent(
             mainClass,
             isGlobal,
-            "-Druntime.checker=" + checkerClass,
-            "-Druntime.trustAnnotatedFor=true",
-            "-Druntime.handler=io.github.eisop.testutils.TestViolationHandler");
+            systemProperty(RuntimeOptions.CHECKER_CLASS_PROPERTY, checkerClass),
+            systemProperty(RuntimeOptions.TRUST_ANNOTATED_FOR_PROPERTY, true),
+            systemProperty(
+                RuntimeOptions.HANDLER_CLASS_PROPERTY,
+                "io.github.eisop.testutils.TestViolationHandler"));
 
     verifyErrors(expectedErrors, result.stdout(), filename);
+  }
+
+  private String mainClassName(Path mainSource) throws IOException {
+    String simpleName = mainSource.getFileName().toString().replace(".java", "");
+    Matcher matcher = PACKAGE_PATTERN.matcher(Files.readString(mainSource));
+    return matcher.find() ? matcher.group(1) + "." + simpleName : simpleName;
   }
 
   private List<ExpectedError> parseExpectedErrors(Path sourceFile) throws IOException {

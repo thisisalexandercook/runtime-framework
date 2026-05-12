@@ -12,6 +12,9 @@ public interface EnforcementPlanner {
     return planMethod(methodContext, List.of(events));
   }
 
+  MethodPlan planUncheckedReceiverFallbackReturn(
+      MethodContext methodContext, BytecodeLocation location, TargetRef.InvokedMethod target);
+
   boolean shouldGenerateBridge(ClassContext classContext, ParentMethod parentMethod);
 
   BridgePlan planBridge(ClassContext classContext, ParentMethod parentMethod);

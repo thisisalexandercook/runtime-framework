@@ -1,5 +1,7 @@
 package io.github.eisop.runtimeframework.runtime;
 
+import io.github.eisop.runtimeframework.config.RuntimeOptions;
+
 /**
  * The abstract base class for all runtime verifiers.
  *
@@ -11,19 +13,18 @@ public abstract class RuntimeVerifier {
   private static volatile ViolationHandler handler;
 
   static {
-    // 1. Try to load from System Property
-    String handlerClass = System.getProperty("runtime.handler");
-    if (handlerClass != null && !handlerClass.isBlank()) {
+    RuntimeOptions options = RuntimeOptions.fromSystemProperties();
+    if (options.hasHandlerClassName()) {
       try {
-        Class<?> clazz = Class.forName(handlerClass);
+        Class<?> clazz = Class.forName(options.handlerClassName());
         handler = (ViolationHandler) clazz.getConstructor().newInstance();
       } catch (Exception e) {
-        System.err.println("[RuntimeFramework] Failed to instantiate handler: " + handlerClass);
+        System.err.println(
+            "[RuntimeFramework] Failed to instantiate handler: " + options.handlerClassName());
         e.printStackTrace();
       }
     }
 
-    // 2. Fallback to Default
     if (handler == null) {
       handler = new ThrowingViolationHandler();
     }
