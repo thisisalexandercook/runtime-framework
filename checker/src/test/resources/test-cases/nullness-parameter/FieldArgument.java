@@ -11,7 +11,6 @@ public class FieldArgument {
 
     public static void main(String[] args) {
         // :: error: (Read Field 'POISON' must be NonNull)
-        // :: error: (Parameter 0 must be NonNull)
         consume(UncheckedLib.POISON);
 
         // :: error: (Read Field 'POISON' must be NonNull)

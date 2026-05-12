@@ -1,7 +1,5 @@
 package io.github.eisop.runtimeframework.instrumentation;
 
-import io.github.eisop.runtimeframework.filter.ClassInfo;
-import io.github.eisop.runtimeframework.filter.Filter;
 import java.lang.classfile.ClassBuilder;
 import java.lang.classfile.ClassElement;
 import java.lang.classfile.ClassModel;
@@ -12,15 +10,8 @@ import java.lang.classfile.attribute.CodeAttribute;
 
 public abstract class RuntimeInstrumenter {
 
-  protected final Filter<ClassInfo> scopeFilter;
-
-  protected RuntimeInstrumenter(Filter<ClassInfo> scopeFilter) {
-    this.scopeFilter = scopeFilter;
-  }
-
-  public ClassTransform asClassTransform(ClassModel classModel, ClassLoader loader) {
-    boolean isCheckedScope =
-        scopeFilter.test(new ClassInfo(classModel.thisClass().asInternalName(), loader, null));
+  public ClassTransform asClassTransform(
+      ClassModel classModel, ClassLoader loader, boolean isCheckedScope) {
 
     return new ClassTransform() {
       @Override

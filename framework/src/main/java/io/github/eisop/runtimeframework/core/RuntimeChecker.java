@@ -1,11 +1,14 @@
 package io.github.eisop.runtimeframework.core;
 
-import io.github.eisop.runtimeframework.filter.ClassInfo;
-import io.github.eisop.runtimeframework.filter.Filter;
+import io.github.eisop.runtimeframework.config.RuntimeOptions;
+import io.github.eisop.runtimeframework.instrumentation.EnforcementInstrumenter;
 import io.github.eisop.runtimeframework.instrumentation.RuntimeInstrumenter;
-import io.github.eisop.runtimeframework.strategy.BoundaryStrategy;
-import io.github.eisop.runtimeframework.strategy.InstrumentationStrategy;
-import io.github.eisop.runtimeframework.strategy.StrictBoundaryStrategy;
+import io.github.eisop.runtimeframework.planning.ContractEnforcementPlanner;
+import io.github.eisop.runtimeframework.policy.RuntimePolicy;
+import io.github.eisop.runtimeframework.resolution.BytecodeHierarchyResolver;
+import io.github.eisop.runtimeframework.resolution.HierarchyResolver;
+import io.github.eisop.runtimeframework.resolution.ResolutionEnvironment;
+import io.github.eisop.runtimeframework.semantics.CheckerSemantics;
 
 /**
  * Represents a specific type system or check to be enforced (e.g., Nullness, Immutability). This
@@ -16,32 +19,43 @@ public abstract class RuntimeChecker {
   /** Returns the name of this checker. This string should match the name used in AnnotatedFor */
   public abstract String getName();
 
-  /**
-   * Creates or returns the instrumenter that injects this checker's logic.
-   *
-   * @param filter The safety filter currently active in the Agent. The instrumenter should use this
-   *     to determine boundary checks (Checked vs Unchecked).
-   */
-  public abstract RuntimeInstrumenter getInstrumenter(Filter<ClassInfo> filter);
+  /** Returns the semantic model used by the framework planner for this checker. */
+  public abstract CheckerSemantics getSemantics();
+
+  public final RuntimeInstrumenter createInstrumenter(RuntimePolicy policy) {
+    return createInstrumenter(policy, RuntimeOptions.fromSystemProperties());
+  }
+
+  public final RuntimeInstrumenter createInstrumenter(
+      RuntimePolicy policy, RuntimeOptions options) {
+    return createInstrumenter(policy, ResolutionEnvironment.system(), options);
+  }
+
+  public RuntimeInstrumenter createInstrumenter(
+      RuntimePolicy policy, ResolutionEnvironment resolutionEnvironment) {
+    return createInstrumenter(policy, resolutionEnvironment, RuntimeOptions.fromSystemProperties());
+  }
+
+  public RuntimeInstrumenter createInstrumenter(
+      RuntimePolicy policy, ResolutionEnvironment resolutionEnvironment, RuntimeOptions options) {
+    CheckerSemantics semantics = getSemantics();
+    HierarchyResolver resolver =
+        new BytecodeHierarchyResolver(info -> policy.isChecked(info), resolutionEnvironment);
+    return new EnforcementInstrumenter(
+        new ContractEnforcementPlanner(policy, semantics, resolutionEnvironment),
+        resolver,
+        semantics.emitter(),
+        policy,
+        resolutionEnvironment,
+        options);
+  }
 
   /**
-   * Helper method to create the appropriate InstrumentationStrategy based on the framework's
-   * configuration (e.g., -Druntime.global=true).
-   *
-   * <p>Subclasses should use this instead of manually checking system properties.
-   *
-   * @param config The TypeSystemConfiguration for this checker.
-   * @param filter The filter defining the boundary between Checked and Unchecked code.
-   * @return A configured InstrumentationStrategy (Standard or Global).
+   * Transitional compatibility hook retained while external callers migrate to framework-owned
+   * instrumenter construction.
    */
-  protected InstrumentationStrategy createStrategy(
-      TypeSystemConfiguration config, Filter<ClassInfo> filter) {
-
-    boolean isGlobalMode = Boolean.getBoolean("runtime.global");
-    if (isGlobalMode) {
-      return new StrictBoundaryStrategy(config, filter);
-    } else {
-      return new BoundaryStrategy(config, filter);
-    }
+  @Deprecated
+  public RuntimeInstrumenter getInstrumenter(RuntimePolicy policy) {
+    return createInstrumenter(policy);
   }
 }

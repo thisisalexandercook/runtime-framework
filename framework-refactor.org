@@ -1,0 +1,798 @@
+#+TITLE: Runtime Framework Refactor
+#+DATE: 2026-03-12
+
+* Goal
+
+Replace ~InstrumentationStrategy~ with a design that separates:
+
+1. /what contract applies to a value flow/,
+2. /whether the active runtime policy wants that flow enforced/, and
+3. /where bytecode should be injected to enforce it/.
+
+The current architecture mixes those concerns inside a single opcode-shaped interface. The
+replacement should keep the top-level framework structure intact while making the checker semantics
+and enforcement planning explicit.
+
+* Why We Are Refactoring
+
+The current ~InstrumentationStrategy~ API has become the place where all of the following happen at
+once:
+
+1. Qualifier interpretation.
+2. Defaulting rules.
+3. Checked/unchecked boundary reasoning.
+4. Inheritance and bridge logic.
+5. Policy gating for standard vs global mode.
+6. Per-opcode injection decisions.
+
+That collapse has already produced real problems:
+
+1. /Unchecked override parameters are not enforced in global mode./
+   - Checked parent contracts disappear when dispatch lands in an unchecked child override.
+   - This is a real soundness hole.
+2. /Array checks are context-free./
+   - Nullable arrays are forced through the default reference check.
+   - This causes false positives.
+3. /Local variable checks key only on slot, not live range./
+   - Reused slots can inherit stale contracts from earlier locals.
+   - This causes false positives and makes local enforcement unreliable.
+4. /Initialization does not compose cleanly./
+   - Commit-state checking belongs at the contract layer, not in a forked transform.
+
+The refactor needs to address those issues directly, not just rename the interface.
+
+* Design Principles
+
+1. Keep the framework generic.
+   - The framework should understand value flows, not nullness-specific rules.
+2. Keep the checker responsible for qualifier semantics.
+   - The checker decides what a field, parameter, return, array component, or receiver requires.
+3. Keep the policy responsible for world boundaries and enabled enforcement modes.
+   - Standard vs global remains a policy concern.
+4. Move to a data-oriented planning model.
+   - The transform should emit typed /events/ and consume typed /plans/.
+5. Make initialization a compositional extension.
+   - Commit-state should layer on top of property contracts.
+6. Make the migration incremental.
+   - The current tests should continue to pass while the old strategy path is removed in phases.
+
+* Keep / Change Summary
+
+| Concept                   | Decision          | Reason |
+|---------------------------+-------------------+--------|
+| ~RuntimePolicy~           | Keep, expand      | Already owns checked vs unchecked classification; should also gate flow-level enforcement. |
+| ~RuntimeChecker~          | Keep, narrow      | Should provide checker semantics, not manufacture strategy objects. |
+| ~RuntimeInstrumenter~     | Keep, reposition  | Still useful as the bytecode rewrite layer, but it should become framework-owned and plan-driven. |
+| ~CheckGenerator~          | Keep short-term   | Useful as a low-level bytecode emission primitive; should sit behind a richer emitter API. |
+| ~InstrumentationStrategy~ | Remove            | It mixes too many concerns and does not carry enough context. |
+| ~BoundaryStrategy~        | Remove            | Its responsibilities should be split across contract resolution, policy, and planning. |
+| ~TypeSystemConfiguration~ | Replace           | Binary ~ENFORCE/NOOP~ plus one default is too weak for arrays, locals, overrides, and lifecycle. |
+
+* End-State Architecture
+
+#+begin_src text
+RuntimeAgent
+  -> load RuntimeChecker
+  -> build RuntimePolicy
+  -> install RuntimeTransformer
+
+RuntimeTransformer
+  -> classify class with RuntimePolicy
+  -> build ClassContext / MethodContext
+  -> invoke RuntimeInstrumenter
+
+RuntimeInstrumenter
+  -> scan bytecode
+  -> normalize instructions into FlowEvents
+  -> ask EnforcementPlanner for MethodPlan / BridgePlan
+  -> emit InstrumentationActions
+
+EnforcementPlanner
+  -> consult RuntimePolicy
+  -> consult CheckerSemantics
+  -> resolve TargetRef into ValueContract
+  -> produce checks and lifecycle hooks
+
+CheckerSemantics
+  -> ContractResolver
+  -> PropertyEmitter
+  -> optional LifecycleSemantics
+#+end_src
+
+The critical shift is that the framework becomes responsible for /value-flow planning/, while the
+checker becomes responsible for /contract meaning/.
+
+* Proposed API Sketch
+
+** RuntimeChecker
+
+We keep ~RuntimeChecker~, but its primary job changes from "build my instrumenter" to "describe my
+semantics".
+
+#+begin_src java
+public interface RuntimeChecker {
+  String getName();
+  CheckerSemantics getSemantics();
+}
+#+end_src
+
+Transitional note:
+
+- During migration, we can temporarily keep ~getInstrumenter(RuntimePolicy)~ as a compatibility
+  method implemented in terms of the new planner.
+- End state should remove checker-owned instrumenter construction from the public API.
+
+** CheckerSemantics
+
+The checker contributes semantic knowledge, not rewrite logic.
+
+#+begin_src java
+public interface CheckerSemantics {
+  ContractResolver contracts();
+  PropertyEmitter emitter();
+
+  default LifecycleSemantics lifecycle() {
+    return LifecycleSemantics.none();
+  }
+}
+#+end_src
+
+Responsibilities:
+
+1. Interpret qualifier annotations and checker defaults.
+2. Define required runtime properties.
+3. Provide low-level bytecode emission for those properties.
+4. Optionally layer lifecycle properties such as commitment.
+
+** ContractResolver
+
+This replaces the "which check do I use here?" half of ~InstrumentationStrategy~.
+
+#+begin_src java
+public interface ContractResolver {
+  ValueContract resolve(TargetRef target, ResolutionContext context);
+}
+#+end_src
+
+The resolver must receive enough context to answer correctly:
+
+1. Target kind.
+2. Declaring class/member.
+3. Bytecode position when needed.
+4. Class loader / module.
+5. Resolution environment for inherited contracts and metadata lookup.
+
+** PropertyEmitter
+
+This replaces the "emit invokestatic for this checker" half of ~CheckGenerator~.
+
+#+begin_src java
+public interface PropertyEmitter {
+  void emitCheck(
+      CodeBuilder builder,
+      PropertyRequirement property,
+      ValueAccess access,
+      DiagnosticSpec diagnostic);
+}
+#+end_src
+
+This lets one checker emit different runtime checks for different properties:
+
+1. ~NON_NULL~
+2. ~COMMITTED~
+3. Future properties such as ~IMMUTABLE~ or ~UNIQUE~
+
+** RuntimePolicy
+
+We keep ~RuntimePolicy~, but extend it from class classification to flow gating.
+
+#+begin_src java
+public interface RuntimePolicy {
+  ClassClassification classify(ClassInfo info);
+  ClassClassification classify(ClassInfo info, ClassModel model);
+
+  default boolean allows(FlowEvent event) {
+    return true;
+  }
+}
+#+end_src
+
+Examples of policy-owned decisions:
+
+1. Standard mode allows method-entry checks inside checked code.
+2. Global mode additionally allows unchecked override enforcement and unchecked-to-checked field
+   write checks.
+3. Future modes may enable or disable lifecycle hooks independently.
+
+The policy should /not/ interpret nullness or initialization semantics. It should only decide
+whether the framework is allowed to enforce a given flow.
+
+** RuntimeInstrumenter
+
+We keep ~RuntimeInstrumenter~, but make it a framework-owned scanner + emitter.
+
+#+begin_src java
+public abstract class RuntimeInstrumenter {
+  protected abstract MethodPlan planMethod(MethodContext context);
+  protected abstract List<BridgePlan> planBridges(ClassContext context);
+}
+#+end_src
+
+In practice, the main implementation will likely be a concrete framework class such as
+~PlanningRuntimeInstrumenter~ or ~EnforcementInstrumenter~, backed by an ~EnforcementPlanner~.
+
+* Core Planning Model
+
+** FlowEvent
+
+A ~FlowEvent~ represents one semantic value flow observed while scanning bytecode.
+
+Suggested initial flow kinds:
+
+1. ~METHOD_PARAMETER~
+2. ~METHOD_RETURN~
+3. ~BOUNDARY_CALL_RETURN~
+4. ~FIELD_READ~
+5. ~FIELD_WRITE~
+6. ~ARRAY_LOAD~
+7. ~ARRAY_STORE~
+8. ~LOCAL_STORE~
+9. ~BRIDGE_PARAMETER~
+10. ~BRIDGE_RETURN~
+11. ~OVERRIDE_PARAMETER~
+12. ~OVERRIDE_RETURN~
+13. ~CONSTRUCTOR_ENTER~
+14. ~CONSTRUCTOR_COMMIT~
+15. ~BOUNDARY_RECEIVER_USE~
+
+Possible shape:
+
+#+begin_src java
+public sealed interface FlowEvent permits ... {
+  FlowKind kind();
+  MethodContext enclosingMethod();
+  BytecodeLocation location();
+}
+#+end_src
+
+Important rule:
+
+- ~FlowEvent~ describes /what value is crossing what boundary/.
+- It does /not/ decide yet whether a check is needed.
+
+** TargetRef
+
+A ~TargetRef~ identifies the receiving contract for the flow.
+
+Suggested variants:
+
+1. ~MethodParameterRef~
+2. ~MethodReturnRef~
+3. ~FieldRef~
+4. ~ArrayComponentRef~
+5. ~LocalRef~
+6. ~ReceiverRef~
+
+Possible shape:
+
+#+begin_src java
+public sealed interface TargetRef permits ... {}
+
+public record MethodParameterRef(MethodRef method, int parameterIndex) implements TargetRef {}
+public record FieldRef(FieldModel field) implements TargetRef {}
+public record ArrayComponentRef(TypeDescriptor arrayType) implements TargetRef {}
+public record LocalRef(int slot, int bytecodeOffset) implements TargetRef {}
+#+end_src
+
+This is what allows arrays and locals to be modeled correctly. The current strategy API only sees
+~TypeKind.REFERENCE~, which is not enough.
+
+** ValueContract
+
+Contracts should no longer be modeled as ~ENFORCE~ or ~NOOP~. They should be a set of required
+runtime properties.
+
+#+begin_src java
+public record ValueContract(List<PropertyRequirement> requirements) {
+  public static ValueContract none() {
+    return new ValueContract(List.of());
+  }
+
+  public boolean isEmpty() {
+    return requirements.isEmpty();
+  }
+}
+
+public record PropertyRequirement(PropertyId propertyId) {}
+
+public enum PropertyId {
+  NON_NULL,
+  COMMITTED
+}
+#+end_src
+
+Examples:
+
+1. Nullness ~@NonNull~ -> ~{ NON_NULL }~
+2. Nullness ~@Nullable~ -> ~{}~
+3. Nullness + initialization on a trusted boundary receiver -> ~{ NON_NULL, COMMITTED }~
+
+This is the core compositional mechanism for future checker overlays.
+
+** InstrumentationAction and Plans
+
+The planner should return explicit actions, not raw checker callbacks.
+
+#+begin_src java
+public sealed interface InstrumentationAction permits ValueCheckAction, LifecycleHookAction {}
+
+public record ValueCheckAction(
+    InjectionPoint injectionPoint,
+    ValueContract contract,
+    AttributionKind attribution,
+    DiagnosticSpec diagnostic) implements InstrumentationAction {}
+
+public record LifecycleHookAction(
+    InjectionPoint injectionPoint,
+    LifecycleHook hook) implements InstrumentationAction {}
+
+public record MethodPlan(List<InstrumentationAction> actions) {}
+public record BridgePlan(MethodRef parentMethod, List<InstrumentationAction> actions) {}
+#+end_src
+
+This gives the framework a stable plan format independent of checker semantics.
+
+* Resolution Environment
+
+Before implementing the planner, we should introduce a shared ~ResolutionEnvironment~.
+
+It should centralize:
+
+1. Parsed ~ClassModel~ caching.
+2. Field and method lookup by declaring owner.
+3. Ancestor traversal.
+4. Package/class annotation lookup.
+5. Local variable live-range queries.
+6. Loader-aware identity and module context.
+
+This environment replaces repeated ad hoc classfile parsing currently spread across strategy and
+hierarchy logic.
+
+Suggested API:
+
+#+begin_src java
+public interface ResolutionEnvironment {
+  Optional<ClassModel> loadClass(String internalName, ClassLoader loader);
+  Optional<FieldModel> findField(FieldOwnerRef owner, String name, String descriptor);
+  Optional<MethodModel> findMethod(MethodOwnerRef owner, String name, String descriptor);
+  Stream<MethodRef> overriddenMethods(MethodRef method);
+  Stream<LocalBinding> localsAt(MethodModel method, int bytecodeOffset, int slot);
+}
+#+end_src
+
+* Nullness End-State Sketch
+
+Nullness should move from:
+
+1. ~TypeSystemConfiguration~
+2. ~BoundaryStrategy~
+3. ~NullnessCheckGenerator~
+
+to:
+
+1. ~NullnessRuntimeChecker~
+2. ~NullnessSemantics~
+3. ~NullnessContractResolver~
+4. ~NullnessPropertyEmitter~
+
+Example:
+
+#+begin_src java
+public final class NullnessRuntimeChecker implements RuntimeChecker {
+  @Override
+  public String getName() {
+    return "nullness";
+  }
+
+  @Override
+  public CheckerSemantics getSemantics() {
+    return new NullnessSemantics();
+  }
+}
+#+end_src
+
+#+begin_src java
+public final class NullnessSemantics implements CheckerSemantics {
+  @Override
+  public ContractResolver contracts() {
+    return new NullnessContractResolver();
+  }
+
+  @Override
+  public PropertyEmitter emitter() {
+    return new NullnessPropertyEmitter();
+  }
+}
+#+end_src
+
+~NullnessContractResolver~ should determine contracts based on the target /kind/, not a single
+global default for all reference values. That is important because defaults for fields, returns,
+locals, arrays, and lifecycle-aware receivers may diverge over time.
+
+* How The New Planner Closes The Current Gaps
+
+** Unchecked Override Parameter Hole
+
+Under the new model:
+
+1. The transform emits an ~OVERRIDE_PARAMETER~ event for unchecked overrides of checked parent
+   methods when policy allows it.
+2. The planner resolves the parent method parameter contract through ~ContractResolver~.
+3. The planner emits a ~ValueCheckAction~ with caller attribution.
+
+This closes the current global-mode hole where checked parent parameter contracts disappear inside
+unchecked overrides.
+
+** Arrays
+
+Under the new model:
+
+1. ~ARRAY_STORE~ and ~ARRAY_LOAD~ events target ~ArrayComponentRef~.
+2. The resolver reads the component contract, not just ~TypeKind.REFERENCE~.
+3. Nullable arrays can resolve to ~ValueContract.none()~ while non-null arrays resolve to
+   ~{ NON_NULL }~.
+
+** Locals
+
+Under the new model:
+
+1. ~LOCAL_STORE~ events include bytecode offset.
+2. ~LocalRef(slot, offset)~ is resolved against local-variable live ranges.
+3. Stale annotations from reused slots no longer leak into later locals.
+
+** Initialization
+
+Under the new model:
+
+1. The lifecycle overlay augments contracts with ~COMMITTED~ when required.
+2. The framework emits lifecycle hooks at constructor entry/commit and receiver use sites.
+3. Property composition remains checker-agnostic.
+
+This is much cleaner than duplicating or subclassing the transform.
+
+* Mapping From Old Strategy Methods To The New Model
+
+| Old API Method | New Representation |
+|----------------+--------------------|
+| ~getParameterCheck~ | ~METHOD_PARAMETER~ event + ~MethodParameterRef~ |
+| ~getReturnCheck~ | ~METHOD_RETURN~ event + ~MethodReturnRef~ |
+| ~getBoundaryCallCheck~ | ~BOUNDARY_CALL_RETURN~ event + callee ~MethodReturnRef~ |
+| ~getFieldReadCheck~ | ~FIELD_READ~ event + ~FieldRef~ |
+| ~getFieldWriteCheck~ | ~FIELD_WRITE~ event + ~FieldRef~ |
+| ~getBoundaryFieldReadCheck~ | ~FIELD_READ~ event + boundary-aware policy/planner |
+| ~getBoundaryFieldWriteCheck~ | ~FIELD_WRITE~ event + boundary-aware policy/planner |
+| ~getBridgeParameterCheck~ | ~BRIDGE_PARAMETER~ event |
+| ~getBridgeReturnCheck~ | ~BRIDGE_RETURN~ event |
+| ~getUncheckedOverrideReturnCheck~ | ~OVERRIDE_RETURN~ event |
+| /missing today/ | ~OVERRIDE_PARAMETER~ event |
+| ~getArrayStoreCheck~ | ~ARRAY_STORE~ event + ~ArrayComponentRef~ |
+| ~getArrayLoadCheck~ | ~ARRAY_LOAD~ event + ~ArrayComponentRef~ |
+| ~getLocalVariableWriteCheck~ | ~LOCAL_STORE~ event + ~LocalRef(slot, offset)~ |
+
+This table is the core migration aid. Every current strategy hook becomes a typed flow event
+instead of a permanent API method.
+
+* Proposed Package Layout
+
+Suggested package additions:
+
+1. ~framework/semantics~
+   - ~CheckerSemantics~
+   - ~ContractResolver~
+   - ~PropertyEmitter~
+   - ~LifecycleSemantics~
+2. ~framework/contracts~
+   - ~ValueContract~
+   - ~PropertyRequirement~
+   - ~PropertyId~
+3. ~framework/planning~
+   - ~FlowEvent~
+   - ~FlowKind~
+   - ~TargetRef~
+   - ~EnforcementPlanner~
+   - ~MethodPlan~
+   - ~BridgePlan~
+   - ~InstrumentationAction~
+4. ~framework/resolution~
+   - ~ResolutionEnvironment~
+   - supporting lookup and cache classes
+5. ~checker/nullness~
+   - ~NullnessSemantics~
+   - ~NullnessContractResolver~
+   - ~NullnessPropertyEmitter~
+
+* Implementation Plan
+
+** Current Status
+
+** Completed
+
+The following refactor phases are already implemented on ~framework-refactor~:
+
+1. /Shared resolution environment/
+   - Added ~ResolutionEnvironment~ and ~CachingResolutionEnvironment~.
+   - Routed existing lookup paths through the shared environment.
+   - Commit: ~14283ff~ (~refactor: introduce shared resolution environment~)
+2. /Planner and contract model/
+   - Added the contract model: ~PropertyId~, ~PropertyRequirement~, ~ValueContract~.
+   - Added the planning model: ~FlowEvent~, ~TargetRef~, ~MethodPlan~, ~BridgePlan~,
+     ~InstrumentationAction~, and related context/value-location types.
+   - Commit: ~6e58975~ (~refactor: add planner and contract model types~)
+3. /Compatibility planner over the legacy strategy path/
+   - Added ~EnforcementPlanner~ and ~StrategyBackedEnforcementPlanner~.
+   - Added the temporary bridge pieces needed to express the old behavior through planner output.
+   - Commit: ~3007e3b~ (~refactor: add strategy-backed enforcement planner~)
+4. /Method-body enforcement now routes through the planner/
+   - ~EnforcementTransform~ now builds ~FlowEvent~ instances and consumes ~MethodPlan~ actions.
+   - The method-body runtime path no longer calls ~InstrumentationStrategy~ directly.
+   - Commit: ~5aeb550~ (~refactor: route method enforcement through planner~)
+5. /Bridge generation now routes through the planner/
+   - ~EnforcementInstrumenter~ now asks the planner whether to synthesize a bridge and emits
+     bridge-entry and bridge-exit checks from ~BridgePlan~ actions.
+   - This work was pulled forward from the original plan so the entire enforcement pipeline is now
+     planner-driven, even though it is still backed by the legacy strategy adapter.
+   - Commit: ~2c485f9~ (~refactor: route bridge generation through planner~)
+
+At this point, the framework-owned instrumentation path is mostly in place. The remaining legacy
+center of gravity is semantic resolution inside ~StrategyBackedEnforcementPlanner~ and
+~InstrumentationStrategy~.
+
+** Remaining Work
+
+What is still left to do:
+
+1. /Regression tests/
+   - The planned tests for unchecked override parameters, nullable arrays, local slot reuse, and
+     no-line-number classes have not been added yet.
+   - We intentionally deferred them to keep the refactor moving, but they still need to land
+     before the behavior-changing phases.
+2. /Introduce checker-owned semantics/
+   - Add ~CheckerSemantics~, ~ContractResolver~, ~PropertyEmitter~, and any lifecycle overlay API.
+   - Change ~RuntimeChecker~ so the end-state API is semantics-driven rather than
+     strategy/instrumenter-driven.
+3. /Port nullness off the strategy adapter/
+   - Implement ~NullnessSemantics~, ~NullnessContractResolver~, and
+     ~NullnessPropertyEmitter~.
+   - Replace planner output based on legacy ~CheckGenerator~ callbacks with planner-native
+     ~ValueCheckAction~ output for nullness.
+4. /Fix the unchecked-override-parameter hole/
+   - Add real ~OVERRIDE_PARAMETER~ planning in global mode.
+   - This is the first intended soundness-changing step.
+5. /Use richer targets to fix arrays and locals/
+   - Resolve actual array component contracts instead of treating all reference arrays the same.
+   - Resolve locals by slot plus live range rather than slot alone.
+6. /Add lifecycle composition/
+   - Add constructor entry/commit hooks and boundary receiver hooks so initialization overlays can
+     compose on top of the property model.
+7. /Delete the migration scaffolding/
+   - Remove ~StrategyBackedEnforcementPlanner~.
+   - Remove ~InstrumentationAction.LegacyCheckAction~.
+   - Remove ~InstrumentationStrategy~, ~BoundaryStrategy~, and the old
+     ~TypeSystemConfiguration~ runtime path once the planner-native semantics are in place.
+
+** Phase 0: Regression Tests First
+
+Add tests for the problems that motivated the refactor:
+
+1. Unchecked override parameter parity in global mode.
+2. Nullable array store/load.
+3. Local variable slot reuse with different type annotations.
+4. No-line-number classes to make sure method-entry planning does not depend on debug tables.
+
+Status:
+
+- Deferred for now. These tests still need to be added before we start the behavior-changing
+  phases.
+
+** Phase 1: Shared Resolution Environment
+
+Implement ~ResolutionEnvironment~ and start routing existing bytecode lookup through it.
+
+Goals:
+
+1. Remove repeated classfile parsing.
+2. Make loader-aware lookups consistent.
+3. Provide a home for local-variable live-range resolution.
+
+Status:
+
+- Completed in ~14283ff~.
+- No intended observable behavior changes.
+
+** Phase 2: Introduce Planner Data Types
+
+Add:
+
+1. ~FlowEvent~
+2. ~TargetRef~
+3. ~ValueContract~
+4. ~PropertyRequirement~
+5. ~MethodPlan~
+6. ~BridgePlan~
+7. ~InstrumentationAction~
+
+Status:
+
+- Completed in ~6e58975~.
+- The old strategy path was still active after this phase, by design.
+
+** Phase 3: Planner Adapter Over Old Strategy
+
+Create an ~EnforcementPlanner~ that internally delegates to the current strategy logic.
+
+Goals:
+
+1. Rewrite the transform to use the planner abstraction.
+2. Preserve behavior while the new architecture is introduced.
+3. Reduce the surface area of the old API without changing semantics all at once.
+
+Status:
+
+- Completed in ~3007e3b~.
+- This is temporary migration infrastructure, not part of the intended end state.
+
+** Phase 4: Rewrite EnforcementTransform Around Flow Events
+
+Refactor the transform so it:
+
+1. Detects semantic flow sites.
+2. Builds ~FlowEvent~ instances.
+3. Applies ~MethodPlan~ actions.
+
+At this point, the transform no longer calls ~getParameterCheck~, ~getFieldReadCheck~, and so on
+directly.
+
+Status:
+
+- Completed in ~5aeb550~.
+
+** Phase 5: Move Bridge Logic To Plans
+
+Bridge generation becomes a normal planning pass:
+
+1. Find inherited obligations missing from the current checked class.
+2. Build ~BridgePlan~ objects.
+3. Emit bridge methods from those plans.
+
+Status:
+
+- Completed early in ~2c485f9~.
+- The bridge pipeline now goes through the planner, but it is still fed by the legacy strategy
+  adapter.
+
+** Phase 6: Move Nullness To CheckerSemantics
+
+Implement:
+
+1. ~NullnessSemantics~
+2. ~NullnessContractResolver~
+3. ~NullnessPropertyEmitter~
+
+Then switch the planner from the strategy adapter to real contract resolution for nullness.
+
+Status:
+
+- Not started yet.
+- This is now the next major architectural step because it removes the semantic dependency on
+  ~InstrumentationStrategy~ rather than just routing around it.
+
+** Phase 7: Close The Soundness Hole
+
+Add real ~OVERRIDE_PARAMETER~ planning for unchecked overrides in global mode.
+
+This is the first behavior-changing phase and should be accompanied by the new regression tests.
+
+Status:
+
+- Not started yet.
+
+** Phase 8: Arrays, Locals, Lifecycle
+
+Use the richer target model to:
+
+1. Fix array component contract resolution.
+2. Fix local variable range-sensitive resolution.
+3. Add lifecycle hooks for initialization overlays.
+
+Status:
+
+- Not started yet.
+
+** Phase 9: Remove Old APIs
+
+Delete:
+
+1. ~InstrumentationStrategy~
+2. ~BoundaryStrategy~
+3. ~StrictBoundaryStrategy~
+4. Old ~TypeSystemConfiguration~ runtime path
+
+Any remaining compatibility shims on ~RuntimeChecker~ should be removed here as well.
+
+Status:
+
+- Not started yet.
+
+* Suggested Commit Breakdown
+
+Completed:
+
+1. Add ~ResolutionEnvironment~ and migrate existing lookup code to it.
+2. Add planner data model.
+3. Add planner compatibility adapter.
+4. Refactor method enforcement to consume ~MethodPlan~.
+5. Refactor bridge generation to consume ~BridgePlan~.
+
+Remaining:
+
+1. Add regression tests for override parameters, arrays, and locals.
+2. Port nullness to ~CheckerSemantics~.
+3. Enable ~OVERRIDE_PARAMETER~ checks and fix the soundness hole.
+4. Fix arrays and locals through richer target resolution.
+5. Add lifecycle semantics for initialization.
+6. Delete old strategy classes and compatibility scaffolding.
+
+* Testing Strategy
+
+We should keep the current directory tests and add:
+
+1. Focused unit tests for ~ResolutionEnvironment~.
+2. Planner tests that assert event-to-plan mapping.
+3. Integration tests for:
+   - unchecked override parameters
+   - override returns
+   - nullable arrays
+   - local slot reuse
+   - bridge generation parity
+   - lifecycle hooks once initialization lands
+
+The planner tests are important. Today most semantics are only validated indirectly through
+instrumented integration tests, which makes architectural regressions harder to localize.
+
+* Open Questions
+
+1. Should attribution remain part of the planner, or become a small separate policy object?
+   - Recommendation: keep attribution in planner output for now.
+2. Should ~RuntimeChecker~ lose ~getInstrumenter(...)~ immediately?
+   - Recommendation: no. Keep a compatibility path during migration.
+3. Should bridge planning live in the same planner as method flows?
+   - Recommendation: yes. Bridges are just another way to satisfy inherited obligations.
+4. Should defaults remain checker-global?
+   - Recommendation: no. Defaults should be resolved per target kind.
+
+* Bottom Line
+
+The refactor should /keep/ the top-level structure and /replace/ the middle layer.
+
+Keep:
+
+1. ~RuntimeChecker~
+2. ~RuntimeInstrumenter~
+3. ~RuntimePolicy~
+
+Replace:
+
+1. ~InstrumentationStrategy~
+2. ~BoundaryStrategy~
+3. ~TypeSystemConfiguration~ as the main semantic representation
+
+The new center of the design should be:
+
+1. ~CheckerSemantics~
+2. ~ContractResolver~
+3. ~EnforcementPlanner~
+4. ~FlowEvent~
+5. ~ValueContract~
+
+That gives the framework enough structure to close the current nullness soundness hole and enough
+headroom to add initialization and future qualifier systems without another architectural reset.

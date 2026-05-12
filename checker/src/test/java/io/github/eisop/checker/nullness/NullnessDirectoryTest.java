@@ -22,11 +22,51 @@ public class NullnessDirectoryTest extends RuntimeTestRunner {
   }
 
   @Test
+  public void testInterfaceScenarios() throws Exception {
+    runDirectoryTest(
+        "nullness-interface",
+        "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker",
+        false);
+  }
+
+  @Test
   public void testFieldReadScenarios() throws Exception {
     runDirectoryTest(
         "nullness-field-read",
         "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker",
         false);
+  }
+
+  @Test
+  public void testArrayScenarios() throws Exception {
+    runDirectoryTest(
+        "nullness-array",
+        "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker",
+        false);
+  }
+
+  @Test
+  public void testGradualArrayScenarios() throws Exception {
+    runDirectoryTest(
+        "nullness-array-gradual",
+        "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker",
+        false);
+  }
+
+  @Test
+  public void testGradualArrayGlobalScenarios() throws Exception {
+    runDirectoryTest(
+        "nullness-array-gradual-global",
+        "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker",
+        true);
+  }
+
+  @Test
+  public void testGradualArrayGlobalOverrideScenarios() throws Exception {
+    runDirectoryTest(
+        "nullness-array-gradual-global-override",
+        "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker",
+        true);
   }
 
   @Test

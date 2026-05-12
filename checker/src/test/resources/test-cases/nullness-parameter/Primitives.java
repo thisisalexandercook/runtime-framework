@@ -7,6 +7,5 @@ public class Primitives {
     }
 
     public static void testPrimitives(int a, String b, boolean c) {
-        // :: error: (Parameter 1 must be NonNull)
     }
 }
