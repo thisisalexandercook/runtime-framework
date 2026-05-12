@@ -20,6 +20,15 @@ public final class NullnessTypeMetadataResolver implements TypeMetadataResolver 
 
   private static final String NON_NULL_DESC = NonNull.class.descriptorString();
   private static final String NULLABLE_DESC = Nullable.class.descriptorString();
+  private final boolean trustExplicitQualifiers;
+
+  public NullnessTypeMetadataResolver() {
+    this(true);
+  }
+
+  public NullnessTypeMetadataResolver(boolean trustExplicitQualifiers) {
+    this.trustExplicitQualifiers = trustExplicitQualifiers;
+  }
 
   @Override
   public TypeUseMetadata resolve(TargetRef target, ResolutionContext context) {
@@ -91,6 +100,9 @@ public final class NullnessTypeMetadataResolver implements TypeMetadataResolver 
     if (!isReferenceDescriptor(descriptor)) {
       return TypeUseMetadata.empty(descriptor);
     }
+    if (!trustExplicitQualifiers) {
+      return TypeUseMetadata.empty(descriptor);
+    }
 
     List<TypeUseQualifier> qualifiers = new ArrayList<>();
     method
@@ -121,6 +133,9 @@ public final class NullnessTypeMetadataResolver implements TypeMetadataResolver 
   private TypeUseMetadata methodReturnTypeUse(MethodModel method) {
     String descriptor = method.methodTypeSymbol().returnType().descriptorString();
     if (!isReferenceDescriptor(descriptor)) {
+      return TypeUseMetadata.empty(descriptor);
+    }
+    if (!trustExplicitQualifiers) {
       return TypeUseMetadata.empty(descriptor);
     }
 
@@ -179,6 +194,9 @@ public final class NullnessTypeMetadataResolver implements TypeMetadataResolver 
     if (!isReferenceDescriptor(descriptor)) {
       return TypeUseMetadata.empty(descriptor);
     }
+    if (!trustExplicitQualifiers) {
+      return TypeUseMetadata.empty(descriptor);
+    }
 
     List<TypeUseQualifier> qualifiers = new ArrayList<>();
     field
@@ -201,6 +219,10 @@ public final class NullnessTypeMetadataResolver implements TypeMetadataResolver 
 
   private TypeUseMetadata localTypeUse(
       TargetRef.Local target, String descriptorHint, ResolutionContext context) {
+    if (!trustExplicitQualifiers) {
+      return TypeUseMetadata.empty(descriptorHint);
+    }
+
     List<TypeUseQualifier> qualifiers = new ArrayList<>();
     for (ResolutionEnvironment.LocalVariableTypeAnnotation localAnnotation :
         context

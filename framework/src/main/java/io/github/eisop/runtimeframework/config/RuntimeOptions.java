@@ -8,6 +8,7 @@ public record RuntimeOptions(
     String checkedClasses,
     boolean globalMode,
     boolean trustAnnotatedFor,
+    boolean trustExplicitQualifiers,
     String handlerClassName,
     String checkerClassName,
     boolean indyBoundaryEnabled) {
@@ -15,6 +16,7 @@ public record RuntimeOptions(
   public static final String CHECKED_CLASSES_PROPERTY = "runtime.classes";
   public static final String GLOBAL_MODE_PROPERTY = "runtime.global";
   public static final String TRUST_ANNOTATED_FOR_PROPERTY = "runtime.trustAnnotatedFor";
+  public static final String TRUST_EXPLICIT_QUALIFIERS_PROPERTY = "runtime.trustExplicitQualifiers";
   public static final String HANDLER_CLASS_PROPERTY = "runtime.handler";
   public static final String CHECKER_CLASS_PROPERTY = "runtime.checker";
   public static final String INDY_BOUNDARY_PROPERTY = "runtime.indy.boundary";
@@ -22,6 +24,7 @@ public record RuntimeOptions(
   public static final String DEFAULT_CHECKED_CLASSES = "";
   public static final boolean DEFAULT_GLOBAL_MODE = false;
   public static final boolean DEFAULT_TRUST_ANNOTATED_FOR = false;
+  public static final boolean DEFAULT_TRUST_EXPLICIT_QUALIFIERS = true;
   public static final String DEFAULT_HANDLER_CLASS = "";
   public static final String DEFAULT_CHECKER_CLASS =
       "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker";
@@ -41,6 +44,7 @@ public record RuntimeOptions(
         DEFAULT_CHECKED_CLASSES,
         DEFAULT_GLOBAL_MODE,
         DEFAULT_TRUST_ANNOTATED_FOR,
+        DEFAULT_TRUST_EXPLICIT_QUALIFIERS,
         DEFAULT_HANDLER_CLASS,
         DEFAULT_CHECKER_CLASS,
         DEFAULT_INDY_BOUNDARY_ENABLED);
@@ -56,6 +60,8 @@ public record RuntimeOptions(
         stringProperty(properties, CHECKED_CLASSES_PROPERTY, DEFAULT_CHECKED_CLASSES),
         booleanProperty(properties, GLOBAL_MODE_PROPERTY, DEFAULT_GLOBAL_MODE),
         booleanProperty(properties, TRUST_ANNOTATED_FOR_PROPERTY, DEFAULT_TRUST_ANNOTATED_FOR),
+        booleanProperty(
+            properties, TRUST_EXPLICIT_QUALIFIERS_PROPERTY, DEFAULT_TRUST_EXPLICIT_QUALIFIERS),
         stringProperty(properties, HANDLER_CLASS_PROPERTY, DEFAULT_HANDLER_CLASS),
         stringProperty(properties, CHECKER_CLASS_PROPERTY, DEFAULT_CHECKER_CLASS),
         booleanProperty(properties, INDY_BOUNDARY_PROPERTY, DEFAULT_INDY_BOUNDARY_ENABLED));

@@ -22,6 +22,11 @@ public abstract class RuntimeChecker {
   /** Returns the semantic model used by the framework planner for this checker. */
   public abstract CheckerSemantics getSemantics();
 
+  /** Returns the semantic model used by the framework planner for this checker and option set. */
+  public CheckerSemantics getSemantics(RuntimeOptions options) {
+    return getSemantics();
+  }
+
   public final RuntimeInstrumenter createInstrumenter(RuntimePolicy policy) {
     return createInstrumenter(policy, RuntimeOptions.fromSystemProperties());
   }
@@ -38,7 +43,7 @@ public abstract class RuntimeChecker {
 
   public RuntimeInstrumenter createInstrumenter(
       RuntimePolicy policy, ResolutionEnvironment resolutionEnvironment, RuntimeOptions options) {
-    CheckerSemantics semantics = getSemantics();
+    CheckerSemantics semantics = getSemantics(options);
     HierarchyResolver resolver =
         new BytecodeHierarchyResolver(info -> policy.isChecked(info), resolutionEnvironment);
     return new EnforcementInstrumenter(

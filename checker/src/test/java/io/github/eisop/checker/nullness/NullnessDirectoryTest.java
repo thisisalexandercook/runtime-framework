@@ -1,6 +1,8 @@
 package io.github.eisop.checker.nullness;
 
+import io.github.eisop.runtimeframework.config.RuntimeOptions;
 import io.github.eisop.testutils.RuntimeTestRunner;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 public class NullnessDirectoryTest extends RuntimeTestRunner {
@@ -11,6 +13,15 @@ public class NullnessDirectoryTest extends RuntimeTestRunner {
         "nullness-parameter",
         "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker",
         false);
+  }
+
+  @Test
+  public void testUntrustedExplicitQualifierScenarios() throws Exception {
+    runDirectoryTest(
+        "nullness-untrusted-explicit-qualifiers",
+        "io.github.eisop.runtimeframework.checker.nullness.NullnessRuntimeChecker",
+        false,
+        List.of(systemProperty(RuntimeOptions.TRUST_EXPLICIT_QUALIFIERS_PROPERTY, false)));
   }
 
   @Test
