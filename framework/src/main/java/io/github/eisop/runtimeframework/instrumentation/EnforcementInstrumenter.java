@@ -2,8 +2,8 @@ package io.github.eisop.runtimeframework.instrumentation;
 
 import io.github.eisop.runtimeframework.config.RuntimeOptions;
 import io.github.eisop.runtimeframework.filter.ClassInfo;
-import io.github.eisop.runtimeframework.planning.BytecodeLocation;
 import io.github.eisop.runtimeframework.planning.BridgePlan;
+import io.github.eisop.runtimeframework.planning.BytecodeLocation;
 import io.github.eisop.runtimeframework.planning.ClassContext;
 import io.github.eisop.runtimeframework.planning.EnforcementPlanner;
 import io.github.eisop.runtimeframework.planning.InjectionPoint.Kind;
@@ -337,8 +337,7 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
               .ifPresent(
                   codeModel ->
                       safeBuilder.transformCode(
-                          codeModel,
-                          new BridgeSafeTransform(methodModel, loader)));
+                          codeModel, new BridgeSafeTransform(methodModel, loader)));
         });
 
     builder.withMethod(
@@ -419,8 +418,7 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
                         .new_(ASSERTION_ERROR)
                         .dup()
                         .ldc(message)
-                        .invokespecial(
-                            ASSERTION_ERROR, "<init>", ASSERTION_ERROR_STRING_CTOR)
+                        .invokespecial(ASSERTION_ERROR, "<init>", ASSERTION_ERROR_STRING_CTOR)
                         .athrow()));
   }
 
@@ -445,7 +443,8 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
               .anyMatch(
                   method ->
                       method.methodName().stringValue().equals(candidate)
-                          && method.methodTypeSymbol()
+                          && method
+                              .methodTypeSymbol()
                               .descriptorString()
                               .equals(descriptor.descriptorString()));
       boolean existsInGenerated =
@@ -651,8 +650,7 @@ public class EnforcementInstrumenter extends RuntimeInstrumenter {
           .filter(
               method ->
                   policy.isChecked(
-                      new ClassInfo(method.ownerInternalName(), loader, null),
-                      method.ownerModel()))
+                      new ClassInfo(method.ownerInternalName(), loader, null), method.ownerModel()))
           .filter(method -> EnforcementInstrumenter.isSplitCandidate(method.method()))
           .filter(method -> methodMatchesOpcode(method.method(), opcode));
     }

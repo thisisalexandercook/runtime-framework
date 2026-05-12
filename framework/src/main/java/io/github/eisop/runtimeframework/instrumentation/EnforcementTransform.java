@@ -305,8 +305,7 @@ public class EnforcementTransform implements CodeTransform {
     }
     if (isCheckedScope) {
       FlowEvent.BoundaryCallReturn event =
-          new FlowEvent.BoundaryCallReturn(
-              methodContext, location, returnBoundaryTarget(i));
+          new FlowEvent.BoundaryCallReturn(methodContext, location, returnBoundaryTarget(i));
       emitPlannedActions(b, event, ActionTiming.AFTER_INSTRUCTION);
     }
   }
