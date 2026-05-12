@@ -1,0 +1,28 @@
+#+TITLE: Runtime Framework TODOs
+
+* Framework-level explicit qualifier trust
+
+The current first pass wires ~runtime.trustExplicitQualifiers~ through the Nullness checker:
+
+#+begin_src java
+  @Override
+  public CheckerSemantics getSemantics(RuntimeOptions options) {
+    return new NullnessSemantics(options.trustExplicitQualifiers());
+  }
+#+end_src
+
+This is acceptable for the initial nullness-only implementation, but the flag is a framework-level
+configuration concept. Before adding more checkers, move enforcement of this flag into the framework
+semantics layer.
+
+Suggested design:
+
+- Add qualifier origin metadata, for example ~EXPLICIT~, ~DEFAULT~, and ~SYNTHETIC~.
+- Make checker-specific resolvers mark explicit bytecode annotations as ~EXPLICIT~.
+- Mark checker defaults, such as nullness default non-null, as ~DEFAULT~.
+- Add a framework-owned semantics/type-metadata wrapper that filters ~EXPLICIT~ qualifiers when
+  ~runtime.trustExplicitQualifiers=false~.
+- Keep checker-specific logic responsible for identifying its qualifiers, but let ~RuntimeChecker~
+  apply the trust flag consistently for all checkers.
+- Once this exists, remove the Nullness-specific boolean constructor path for explicit qualifier
+  trust.

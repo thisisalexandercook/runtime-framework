@@ -1,5 +1,6 @@
 package io.github.eisop.runtimeframework.checker.nullness;
 
+import io.github.eisop.runtimeframework.config.RuntimeOptions;
 import io.github.eisop.runtimeframework.core.RuntimeChecker;
 import io.github.eisop.runtimeframework.semantics.CheckerSemantics;
 
@@ -15,5 +16,10 @@ public class NullnessRuntimeChecker extends RuntimeChecker {
   @Override
   public CheckerSemantics getSemantics() {
     return SEMANTICS;
+  }
+
+  @Override
+  public CheckerSemantics getSemantics(RuntimeOptions options) {
+    return new NullnessSemantics(options.trustExplicitQualifiers());
   }
 }

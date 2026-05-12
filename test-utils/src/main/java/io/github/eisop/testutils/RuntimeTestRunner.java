@@ -20,6 +20,12 @@ public class RuntimeTestRunner extends AgentTestHarness {
 
   public void runDirectoryTest(String dirName, String checkerClass, boolean isGlobal)
       throws Exception {
+    runDirectoryTest(dirName, checkerClass, isGlobal, List.of());
+  }
+
+  public void runDirectoryTest(
+      String dirName, String checkerClass, boolean isGlobal, List<String> extraAgentArgs)
+      throws Exception {
     setup();
     try {
       String resourcePath = "test-cases/" + dirName;
@@ -62,7 +68,7 @@ public class RuntimeTestRunner extends AgentTestHarness {
       }
 
       for (Path mainSource : mainFiles) {
-        runSingleTest(mainSource, helperFiles, checkerClass, isGlobal);
+        runSingleTest(mainSource, helperFiles, checkerClass, isGlobal, extraAgentArgs);
       }
 
     } finally {
@@ -71,7 +77,11 @@ public class RuntimeTestRunner extends AgentTestHarness {
   }
 
   private void runSingleTest(
-      Path mainSource, List<Path> helperFiles, String checkerClass, boolean isGlobal)
+      Path mainSource,
+      List<Path> helperFiles,
+      String checkerClass,
+      boolean isGlobal,
+      List<String> extraAgentArgs)
       throws Exception {
     System.out.println("Running test: " + mainSource.getFileName());
 
@@ -84,15 +94,16 @@ public class RuntimeTestRunner extends AgentTestHarness {
     String filename = mainSource.getFileName().toString();
     String mainClass = mainClassName(mainSource);
 
-    TestResult result =
-        runAgent(
-            mainClass,
-            isGlobal,
-            systemProperty(RuntimeOptions.CHECKER_CLASS_PROPERTY, checkerClass),
-            systemProperty(RuntimeOptions.TRUST_ANNOTATED_FOR_PROPERTY, true),
-            systemProperty(
-                RuntimeOptions.HANDLER_CLASS_PROPERTY,
-                "io.github.eisop.testutils.TestViolationHandler"));
+    List<String> agentArgs = new ArrayList<>();
+    agentArgs.add(systemProperty(RuntimeOptions.CHECKER_CLASS_PROPERTY, checkerClass));
+    agentArgs.add(systemProperty(RuntimeOptions.TRUST_ANNOTATED_FOR_PROPERTY, true));
+    agentArgs.add(
+        systemProperty(
+            RuntimeOptions.HANDLER_CLASS_PROPERTY,
+            "io.github.eisop.testutils.TestViolationHandler"));
+    agentArgs.addAll(extraAgentArgs);
+
+    TestResult result = runAgent(mainClass, isGlobal, agentArgs.toArray(String[]::new));
 
     verifyErrors(expectedErrors, result.stdout(), filename);
   }
